@@ -26,7 +26,9 @@ jobs:
         uses: azure/setup-helm@v4
 
       - name: Install helm-unittest plugin
-        run: helm plugin install https://github.com/helm-unittest/helm-unittest
+        # --verify=false works around helm-unittest not yet supporting Helm
+        # v4's plugin verification: https://github.com/helm-unittest/helm-unittest/issues/777
+        run: helm plugin install https://github.com/helm-unittest/helm-unittest --verify=false
 
       - name: helm lint
         run: |
