@@ -111,7 +111,10 @@ ENV PATH="/home/dev/.local/bin:${PATH}"
 
 # helm unittest plugin. Installed as `dev`, not root, so it lands under
 # ~dev/.local/share/helm/plugins where the `dev`-run helm will find it.
-RUN helm plugin install https://github.com/helm-unittest/helm-unittest
+# --verify=false: helm-unittest doesn't publish plugin provenance, and
+# Helm v4 requires that flag explicitly to install without it.
+# https://github.com/helm-unittest/helm-unittest/issues/777
+RUN helm plugin install https://github.com/helm-unittest/helm-unittest --verify=false
 
 WORKDIR /workspace
 CMD ["/bin/bash"]
