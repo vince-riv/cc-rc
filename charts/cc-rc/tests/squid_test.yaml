@@ -1,0 +1,100 @@
+suite: squid proxy (happy path)
+templates:
+  - deployment-squid.yaml
+  - service-squid.yaml
+  - configmap-squid.yaml
+set:
+  github.token: dummy-token
+  repos:
+    - org: myorg
+      repo: myrepo
+tests:
+  - it: renders a squid Deployment with the configured image and replica count
+    template: deployment-squid.yaml
+    set:
+      proxy.replicaCount: 2
+    asserts:
+      - isKind:
+          of: Deployment
+      - equal:
+          path: spec.replicas
+          value: 2
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ubuntu/squid:7.2-26.04_edge
+      - equal:
+          path: spec.template.spec.containers[0].ports[0].containerPort
+          value: 3128
+      - equal:
+          path: spec.template.metadata.labels["app.kubernetes.io/component"]
+          value: proxy
+
+  - it: renders a squid ClusterIP Service on the proxy port
+    template: service-squid.yaml
+    asserts:
+      - isKind:
+          of: Service
+      - equal:
+          path: spec.type
+          value: ClusterIP
+      - equal:
+          path: spec.ports[0].port
+          value: 3128
+      - equal:
+          path: spec.selector["app.kubernetes.io/component"]
+          value: proxy
+
+  - it: open-web mode (empty allowList) allows configured ports and github.com:22
+    template: configmap-squid.yaml
+    asserts:
+      - isKind:
+          of: ConfigMap
+      - matchRegex:
+          path: data["squid.conf"]
+          pattern: "acl github_ssh dstdomain github.com"
+      - matchRegex:
+          path: data["squid.conf"]
+          pattern: "http_access allow github_ssh port_22"
+      - matchRegex:
+          path: data["squid.conf"]
+          pattern: "acl open_ports port 80 443 8080 8443 3000 5000 8000 9000"
+      - matchRegex:
+          path: data["squid.conf"]
+          pattern: "acl default_blocked_domains dstdomain cluster.local"
+      - matchRegex:
+          path: data["squid.conf"]
+          pattern: "acl default_blocked_cidrs dst 192.168.0.0/16 10.0.0.0/8 172.16.0.0/12"
+
+  - it: strict allow-list mode restricts to allowed destinations with no ssh carve-out
+    template: configmap-squid.yaml
+    set:
+      proxy.allowList:
+        - github.com
+        - 140.82.112.0/20
+    asserts:
+      - matchRegex:
+          path: data["squid.conf"]
+          pattern: "acl allow_domains dstdomain github.com"
+      - matchRegex:
+          path: data["squid.conf"]
+          pattern: "acl allow_cidrs dst 140.82.112.0/20"
+      - notMatchRegex:
+          path: data["squid.conf"]
+          pattern: "acl github_ssh"
+      - matchRegex:
+          path: data["squid.conf"]
+          pattern: "http_access deny all"
+
+  - it: denyList entries render ahead of the allow-list-or-open-web logic
+    template: configmap-squid.yaml
+    set:
+      proxy.denyList:
+        - .evil.example.com
+        - 203.0.113.0/24
+    asserts:
+      - matchRegex:
+          path: data["squid.conf"]
+          pattern: "acl user_deny_domains dstdomain .evil.example.com"
+      - matchRegex:
+          path: data["squid.conf"]
+          pattern: "acl user_deny_cidrs dst 203.0.113.0/24"

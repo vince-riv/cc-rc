@@ -1,0 +1,73 @@
+suite: agent egress NetworkPolicy (happy path)
+templates:
+  - networkpolicy-agent.yaml
+set:
+  github.token: dummy-token
+  repos:
+    - org: myorg
+      repo: myrepo
+tests:
+  - it: selects only agent pods, not proxy pods
+    asserts:
+      - isKind:
+          of: NetworkPolicy
+      - equal:
+          path: spec.podSelector.matchLabels["app.kubernetes.io/component"]
+          value: agent
+      - equal:
+          path: spec.policyTypes[0]
+          value: Egress
+
+  - it: allows DNS egress to the configured kube-dns selector
+    asserts:
+      - equal:
+          path: spec.egress[0].to[0].namespaceSelector.matchLabels["kubernetes.io/metadata.name"]
+          value: kube-system
+      - equal:
+          path: spec.egress[0].to[0].podSelector.matchLabels["k8s-app"]
+          value: kube-dns
+      - contains:
+          path: spec.egress[0].ports
+          content:
+            protocol: UDP
+            port: 53
+      - contains:
+          path: spec.egress[0].ports
+          content:
+            protocol: TCP
+            port: 53
+
+  - it: allows egress to the squid proxy pods on the proxy port
+    asserts:
+      - equal:
+          path: spec.egress[1].to[0].podSelector.matchLabels["app.kubernetes.io/component"]
+          value: proxy
+      - equal:
+          path: spec.egress[1].ports[0].port
+          value: 3128
+
+  - it: honors a custom DNS namespace/selector/port
+    set:
+      networkPolicy:
+        dns:
+          namespace: my-dns-ns
+          podSelector:
+            k8s-app: coredns
+          port: 5353
+    asserts:
+      - equal:
+          path: spec.egress[0].to[0].namespaceSelector.matchLabels["kubernetes.io/metadata.name"]
+          value: my-dns-ns
+      - equal:
+          path: spec.egress[0].to[0].podSelector.matchLabels["k8s-app"]
+          value: coredns
+      - equal:
+          path: spec.egress[0].ports[0].port
+          value: 5353
+
+  - it: is omitted entirely when networkPolicy.enabled is false
+    set:
+      networkPolicy.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0

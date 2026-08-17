@@ -1,0 +1,11 @@
+apiVersion: v2
+name: cc-rc
+description: Headless Claude Code remote-control agents (one StatefulSet per GitHub repo) behind a locked-down Squid egress proxy
+type: application
+version: 0.1.0
+appVersion: "latest"
+keywords:
+  - claude-code
+  - agent
+  - squid
+  - egress-proxy

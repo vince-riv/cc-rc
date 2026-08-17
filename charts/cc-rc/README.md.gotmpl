@@ -1,0 +1,92 @@
+{{ template "chart.header" . }}
+{{ template "chart.deprecationWarning" . }}
+
+{{ template "chart.badgesSection" . }}
+
+{{ template "chart.description" . }}
+
+{{ template "chart.homepageLine" . }}
+
+Helm chart that runs headless [Claude Code](https://claude.ai/) agents, one per GitHub
+repo, each behind a locked-down [Squid](https://www.squid-cache.org/) egress proxy.
+
+## What it deploys
+
+- A Squid `Deployment` + `Service`, configured from `values.yaml` (allow list / deny
+  list / default-blocked cluster-internal ranges). This is the only workload in the
+  chart with unrestricted egress.
+- One `StatefulSet` (replicas: 1) per entry in `values.repos`, running the
+  `ghcr.io/vince-riv/cc-rc` image. Each gets:
+  - a 500Mi PVC mounted at `/home/dev/.claude`
+  - a 5Gi PVC mounted at `/workspace`
+  - an init container that clones the repo into `/workspace` (skipped if already cloned)
+  - `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` (+ lowercase variants) pointed at the Squid
+    `Service`, and `GH_TOKEN` from a `Secret`
+- A `NetworkPolicy` that denies all egress from the agent `StatefulSet` pods except to
+  the Squid `Service` and to cluster DNS.
+
+## Configuring GitHub auth
+
+Set exactly one of:
+
+```yaml
+github:
+  token: "ghp_..."          # chart creates a Secret for you
+# or
+github:
+  existingSecret: "my-secret"
+  existingSecretKey: "token"  # defaults to "token"
+```
+
+## Configuring per-repo resources
+
+`repos[].resources` is deep-merged over the top-level `resources` default, so a repo
+can override just `cpu` or just `memory` without repeating the other:
+
+```yaml
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+
+repos:
+  - org: myorg
+    repo: myrepo
+    resources:
+      requests:
+        cpu: "2"          # memory still comes from the default above
+```
+
+## Configuring egress
+
+`proxy.allowList` empty (default) = open-web mode: any destination is reachable on
+`proxy.allowedPortsWhenOpen`, plus `github.com:22` for git+ssh, except `proxy.denyList`
+and the baked-in cluster-internal ranges (`cluster.local`, `192.168.0.0/16`,
+`10.0.0.0/8`, `172.16.0.0/12`).
+
+Setting `proxy.allowList` switches to strict mode: only those domains/CIDRs (ports
+80/443) are reachable. There is **no** automatic `github.com:22` carve-out in strict
+mode — add `github.com` to `proxy.allowList` yourself if you need it there.
+`proxy.denyList` always wins over `proxy.allowList`.
+
+{{ template "chart.maintainersSection" . }}
+
+{{ template "chart.sourcesSection" . }}
+
+{{ template "chart.requirementsSection" . }}
+
+{{ template "chart.valuesHeader" . }}
+
+{{ template "chart.valuesTable" . }}
+
+## Rendering and testing locally
+
+```sh
+helm lint charts/cc-rc
+helm template cc-rc charts/cc-rc \
+  --set repos[0].org=myorg --set repos[0].repo=myrepo \
+  --set github.token=dummy
+helm unittest charts/cc-rc
+```
+
+{{ template "helm-docs.versionFooter" . }}

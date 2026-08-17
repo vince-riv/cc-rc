@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cc-rc.fullname" . }}-squid
+  labels:
+    {{- include "cc-rc.labels" . | nindent 4 }}
+    app.kubernetes.io/component: proxy
+spec:
+  replicas: {{ .Values.proxy.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "cc-rc.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: proxy
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap-squid.yaml") . | sha256sum }}
+      labels:
+        {{- include "cc-rc.labels" . | nindent 8 }}
+        app.kubernetes.io/component: proxy
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: squid
+          image: "{{ .Values.proxy.image.repository }}:{{ .Values.proxy.image.tag }}"
+          imagePullPolicy: {{ .Values.proxy.image.pullPolicy }}
+          args:
+            - "-f"
+            - "/etc/squid/squid.conf"
+            - "-N"
+          ports:
+            - name: squid
+              containerPort: {{ .Values.proxy.service.port }}
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: squid
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: squid
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          volumeMounts:
+            - name: squid-config
+              mountPath: /etc/squid/squid.conf
+              subPath: squid.conf
+          {{- with .Values.proxy.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: squid-config
+          configMap:
+            name: {{ include "cc-rc.fullname" . }}-squid-config

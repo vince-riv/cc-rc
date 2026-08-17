@@ -1,0 +1,146 @@
+{{- include "cc-rc.validateGithubAuth" . -}}
+{{- $root := . -}}
+{{- $proxyURL := printf "http://%s.%s.svc.cluster.local:%v" (include "cc-rc.squidServiceName" .) .Release.Namespace .Values.proxy.service.port -}}
+{{- $noProxy := "localhost,127.0.0.1,.svc,.svc.cluster.local,.cluster.local" -}}
+{{- range $repoEntry := .Values.repos }}
+{{- $slug := include "cc-rc.repoSlug" $repoEntry }}
+{{- $name := printf "%s-%s" (include "cc-rc.fullname" $root) $slug }}
+{{- $claudeSize := ($repoEntry.storage).claudeSize | default $root.Values.storage.claudeSize }}
+{{- $workspaceSize := ($repoEntry.storage).workspaceSize | default $root.Values.storage.workspaceSize }}
+{{- $resources := mergeOverwrite (deepCopy $root.Values.resources) ($repoEntry.resources | default dict) }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "cc-rc.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: agent
+    cc-rc.io/org: {{ $repoEntry.org | quote }}
+    cc-rc.io/repo: {{ $repoEntry.repo | quote }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "cc-rc.selectorLabels" $root | nindent 4 }}
+    app.kubernetes.io/component: agent
+    cc-rc.io/org: {{ $repoEntry.org | quote }}
+    cc-rc.io/repo: {{ $repoEntry.repo | quote }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "cc-rc.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: agent
+    cc-rc.io/org: {{ $repoEntry.org | quote }}
+    cc-rc.io/repo: {{ $repoEntry.repo | quote }}
+spec:
+  serviceName: {{ $name }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "cc-rc.selectorLabels" $root | nindent 6 }}
+      app.kubernetes.io/component: agent
+      cc-rc.io/org: {{ $repoEntry.org | quote }}
+      cc-rc.io/repo: {{ $repoEntry.repo | quote }}
+  template:
+    metadata:
+      labels:
+        {{- include "cc-rc.labels" $root | nindent 8 }}
+        app.kubernetes.io/component: agent
+        cc-rc.io/org: {{ $repoEntry.org | quote }}
+        cc-rc.io/repo: {{ $repoEntry.repo | quote }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        fsGroup: {{ $root.Values.podFsGroup }}
+      initContainers:
+        - name: clone-repo
+          image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              DEST="/workspace/{{ $repoEntry.repo }}"
+              if [ -d "$DEST/.git" ]; then
+                echo "Already cloned at $DEST, skipping."
+              else
+                git clone "https://x-access-token:${GH_TOKEN}@github.com/{{ $repoEntry.org }}/{{ $repoEntry.repo }}.git" "$DEST"
+              fi
+          env:
+            - name: GH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cc-rc.githubSecretName" $root }}
+                  key: {{ include "cc-rc.githubSecretKey" $root }}
+            - name: HTTP_PROXY
+              value: {{ $proxyURL | quote }}
+            - name: HTTPS_PROXY
+              value: {{ $proxyURL | quote }}
+            - name: http_proxy
+              value: {{ $proxyURL | quote }}
+            - name: https_proxy
+              value: {{ $proxyURL | quote }}
+            - name: NO_PROXY
+              value: {{ $noProxy | quote }}
+            - name: no_proxy
+              value: {{ $noProxy | quote }}
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+      containers:
+        - name: agent
+          image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          command: ["/bin/bash", "-c", "sleep infinity"]
+          env:
+            - name: GH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cc-rc.githubSecretName" $root }}
+                  key: {{ include "cc-rc.githubSecretKey" $root }}
+            - name: HTTP_PROXY
+              value: {{ $proxyURL | quote }}
+            - name: HTTPS_PROXY
+              value: {{ $proxyURL | quote }}
+            - name: http_proxy
+              value: {{ $proxyURL | quote }}
+            - name: https_proxy
+              value: {{ $proxyURL | quote }}
+            - name: NO_PROXY
+              value: {{ $noProxy | quote }}
+            - name: no_proxy
+              value: {{ $noProxy | quote }}
+          volumeMounts:
+            - name: claude-home
+              mountPath: /home/dev/.claude
+            - name: workspace
+              mountPath: /workspace
+          {{- with $resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+  volumeClaimTemplates:
+    - metadata:
+        name: claude-home
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if $root.Values.storage.storageClassName }}
+        storageClassName: {{ $root.Values.storage.storageClassName }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $claudeSize }}
+    - metadata:
+        name: workspace
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if $root.Values.storage.storageClassName }}
+        storageClassName: {{ $root.Values.storage.storageClassName }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $workspaceSize }}
+{{- end }}

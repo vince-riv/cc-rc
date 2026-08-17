@@ -1,0 +1,246 @@
+suite: per-repo agent StatefulSet (happy path)
+templates:
+  - statefulset-repo.yaml
+set:
+  github.token: dummy-token
+tests:
+  - it: renders a headless Service and a StatefulSet named after the org/repo slug
+    set:
+      repos:
+        - org: MyOrg
+          repo: My_Repo!
+    asserts:
+      - documentIndex: 0
+        isKind:
+          of: Service
+      - documentIndex: 0
+        equal:
+          path: metadata.name
+          value: RELEASE-NAME-cc-rc-myorg-my-repo
+      - documentIndex: 0
+        equal:
+          path: spec.clusterIP
+          value: None
+      - documentIndex: 1
+        isKind:
+          of: StatefulSet
+      - documentIndex: 1
+        equal:
+          path: metadata.name
+          value: RELEASE-NAME-cc-rc-myorg-my-repo
+      - documentIndex: 1
+        equal:
+          path: spec.replicas
+          value: 1
+      - documentIndex: 1
+        equal:
+          path: spec.serviceName
+          value: RELEASE-NAME-cc-rc-myorg-my-repo
+      - documentIndex: 1
+        equal:
+          path: metadata.labels["cc-rc.io/org"]
+          value: MyOrg
+      - documentIndex: 1
+        equal:
+          path: metadata.labels["cc-rc.io/repo"]
+          value: My_Repo!
+
+  - it: uses default PVC sizes when a repo doesn't override storage
+    set:
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - documentIndex: 1
+        equal:
+          path: spec.volumeClaimTemplates[0].metadata.name
+          value: claude-home
+      - documentIndex: 1
+        equal:
+          path: spec.volumeClaimTemplates[0].spec.resources.requests.storage
+          value: 500Mi
+      - documentIndex: 1
+        equal:
+          path: spec.volumeClaimTemplates[1].metadata.name
+          value: workspace
+      - documentIndex: 1
+        equal:
+          path: spec.volumeClaimTemplates[1].spec.resources.requests.storage
+          value: 5Gi
+
+  - it: a repo can override PVC sizes
+    set:
+      repos:
+        - org: myorg
+          repo: myrepo
+          storage:
+            claudeSize: 1Gi
+            workspaceSize: 20Gi
+    asserts:
+      - documentIndex: 1
+        equal:
+          path: spec.volumeClaimTemplates[0].spec.resources.requests.storage
+          value: 1Gi
+      - documentIndex: 1
+        equal:
+          path: spec.volumeClaimTemplates[1].spec.resources.requests.storage
+          value: 20Gi
+
+  - it: applies the default resources to the agent container when no repo override is set
+    set:
+      resources:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+        limits:
+          cpu: "1"
+          memory: 2Gi
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.containers[0].resources.requests.cpu
+          value: 250m
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.containers[0].resources.requests.memory
+          value: 512Mi
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.containers[0].resources.limits.cpu
+          value: "1"
+
+  - it: a repo can override just cpu, keeping the default memory
+    set:
+      resources:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+      repos:
+        - org: myorg
+          repo: myrepo
+          resources:
+            requests:
+              cpu: "2"
+    asserts:
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.containers[0].resources.requests.cpu
+          value: "2"
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.containers[0].resources.requests.memory
+          value: 512Mi
+
+  - it: a repo can fully override resources independently of the chart default
+    set:
+      resources:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+      repos:
+        - org: alpha
+          repo: one
+        - org: beta
+          repo: two
+          resources:
+            requests:
+              cpu: "4"
+              memory: 8Gi
+    asserts:
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.containers[0].resources.requests.cpu
+          value: 250m
+      - documentIndex: 3
+        equal:
+          path: spec.template.spec.containers[0].resources.requests.cpu
+          value: "4"
+      - documentIndex: 3
+        equal:
+          path: spec.template.spec.containers[0].resources.requests.memory
+          value: 8Gi
+
+  - it: wires proxy env vars and GH_TOKEN into both the init container and the agent container
+    set:
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.initContainers[0].env
+          content:
+            name: HTTPS_PROXY
+            value: http://RELEASE-NAME-cc-rc-squid.NAMESPACE.svc.cluster.local:3128
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: HTTPS_PROXY
+            value: http://RELEASE-NAME-cc-rc-squid.NAMESPACE.svc.cluster.local:3128
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.containers[0].env[0].valueFrom.secretKeyRef.name
+          value: cc-rc-github-token
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.containers[0].env[0].valueFrom.secretKeyRef.key
+          value: token
+
+  - it: mounts the claude-home and workspace PVCs at the expected paths
+    set:
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: claude-home
+            mountPath: /home/dev/.claude
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: workspace
+            mountPath: /workspace
+
+  - it: renders one StatefulSet per repo entry
+    set:
+      repos:
+        - org: alpha
+          repo: one
+        - org: beta
+          repo: two
+    asserts:
+      - documentIndex: 1
+        equal:
+          path: metadata.name
+          value: RELEASE-NAME-cc-rc-alpha-one
+      - documentIndex: 3
+        equal:
+          path: metadata.name
+          value: RELEASE-NAME-cc-rc-beta-two
+
+  - it: uses an existing GH_TOKEN secret when github.existingSecret is set
+    set:
+      github:
+        token: ""
+        existingSecret: my-existing-secret
+        existingSecretKey: gh-pat
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.containers[0].env[0].valueFrom.secretKeyRef.name
+          value: my-existing-secret
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.containers[0].env[0].valueFrom.secretKeyRef.key
+          value: gh-pat

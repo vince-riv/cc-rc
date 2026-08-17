@@ -1,0 +1,107 @@
+{{- $denyDomains := list -}}
+{{- $denyCidrs := list -}}
+{{- range .Values.proxy.denyList -}}
+  {{- if contains "/" . -}}
+    {{- $denyCidrs = append $denyCidrs . -}}
+  {{- else -}}
+    {{- $denyDomains = append $denyDomains . -}}
+  {{- end -}}
+{{- end -}}
+{{- $allowDomains := list -}}
+{{- $allowCidrs := list -}}
+{{- range .Values.proxy.allowList -}}
+  {{- if contains "/" . -}}
+    {{- $allowCidrs = append $allowCidrs . -}}
+  {{- else -}}
+    {{- $allowDomains = append $allowDomains . -}}
+  {{- end -}}
+{{- end -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cc-rc.fullname" . }}-squid-config
+  labels:
+    {{- include "cc-rc.labels" . | nindent 4 }}
+    app.kubernetes.io/component: proxy
+data:
+  squid.conf: |
+    http_port {{ .Values.proxy.service.port }}
+    visible_hostname squid
+    coredump_dir /var/spool/squid
+    refresh_pattern ^ftp:           1440    20%     10080
+    refresh_pattern ^gopher:        1440    0%      1440
+    refresh_pattern -i (/cgi-bin/|\?) 0     0%      0
+    refresh_pattern .                0      20%     4320
+
+    acl CONNECT method CONNECT
+    acl SSL_ports port 443
+    acl SSL_ports port 22
+    {{- range .Values.proxy.allowedPortsWhenOpen }}
+    {{- if ne (toString .) "443" }}
+    acl SSL_ports port {{ . }}
+    {{- end }}
+    {{- end }}
+    acl Safe_ports port 80
+    acl Safe_ports port 443
+    acl Safe_ports port 22
+    {{- range .Values.proxy.allowedPortsWhenOpen }}
+    acl Safe_ports port {{ . }}
+    {{- end }}
+
+    #
+    # ACL precedence (evaluated top to bottom, first match wins):
+    #   1. protocol/port sanity
+    #   2. baked-in defaultBlocked destinations — always denied
+    #   3. user-supplied denyList — always denied
+    #   4. allow-list-or-open-web logic, then deny everything else
+    #      (github.com:22 is only auto-allowed in open-web mode; in strict
+    #      allow-list mode it is NOT a bypass — add github.com to
+    #      proxy.allowList yourself if you need it there)
+    #
+
+    # -- 1. protocol/port sanity --
+    http_access deny CONNECT !SSL_ports
+    http_access deny !Safe_ports
+
+    # -- 2. baked-in defaultBlocked destinations, always denied --
+    acl default_blocked_domains dstdomain {{ range .Values.proxy.defaultBlocked }}{{ if not (contains "/" .) }}{{ . }} {{ end }}{{ end }}
+    acl default_blocked_cidrs dst {{ range .Values.proxy.defaultBlocked }}{{ if contains "/" . }}{{ . }} {{ end }}{{ end }}
+    http_access deny default_blocked_domains
+    http_access deny default_blocked_cidrs
+
+    # -- 3. user-supplied denyList, always denied --
+    {{- if $denyDomains }}
+    acl user_deny_domains dstdomain {{ $denyDomains | join " " }}
+    http_access deny user_deny_domains
+    {{- end }}
+    {{- if $denyCidrs }}
+    acl user_deny_cidrs dst {{ $denyCidrs | join " " }}
+    http_access deny user_deny_cidrs
+    {{- end }}
+
+    # -- 4. allow-list-or-open-web logic --
+    {{- if .Values.proxy.allowList }}
+    # Strict allow-list mode: only these destinations, on ports 80/443.
+    # No github.com:22 carve-out here — add github.com to proxy.allowList
+    # yourself if ssh access to it is needed under strict mode.
+    acl allowed_ports port 80
+    acl allowed_ports port 443
+    {{- if $allowDomains }}
+    acl allow_domains dstdomain {{ $allowDomains | join " " }}
+    http_access allow allow_domains allowed_ports
+    {{- end }}
+    {{- if $allowCidrs }}
+    acl allow_cidrs dst {{ $allowCidrs | join " " }}
+    http_access allow allow_cidrs allowed_ports
+    {{- end }}
+    http_access deny all
+    {{- else }}
+    # Open-web mode: allow everything not already denied, on the configured
+    # ports, plus github.com:22 for git+ssh.
+    acl github_ssh dstdomain github.com
+    acl port_22 port 22
+    http_access allow github_ssh port_22
+    acl open_ports port {{ .Values.proxy.allowedPortsWhenOpen | join " " }}
+    http_access allow open_ports
+    http_access deny all
+    {{- end }}

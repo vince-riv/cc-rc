@@ -1,0 +1,43 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "cc-rc.fullname" . }}-agent-egress
+  labels:
+    {{- include "cc-rc.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "cc-rc.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: agent
+  policyTypes:
+    - Egress
+  egress:
+    # DNS, so agent pods can resolve the squid Service's ClusterIP.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.dns.namespace }}
+          podSelector:
+            matchLabels:
+              {{- range $k, $v := .Values.networkPolicy.dns.podSelector }}
+              {{ $k }}: {{ $v | quote }}
+              {{- end }}
+      ports:
+        - protocol: UDP
+          port: {{ .Values.networkPolicy.dns.port }}
+        - protocol: TCP
+          port: {{ .Values.networkPolicy.dns.port }}
+    # The squid proxy Deployment's pods, same namespace. This is the ONLY
+    # other egress agent pods are allowed — squid pods themselves are never
+    # selected by this (or any) NetworkPolicy, so squid keeps unrestricted
+    # egress to actually reach the internet.
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "cc-rc.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: proxy
+      ports:
+        - protocol: TCP
+          port: {{ .Values.proxy.service.port }}
+{{- end }}
