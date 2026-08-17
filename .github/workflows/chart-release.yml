@@ -1,0 +1,144 @@
+name: Chart Release
+
+# Triggers on semver-ish tags: vX.Y.Z, optionally with a "-suffix"
+# (e.g. v1.2.3, v1.2.3-rc1, v1.2.3-beta.2). The glob below is a coarse
+# pre-filter; the tag is strictly validated in the "Parse tag" step.
+#
+# NOTE: this assumes a single chart in the repo (charts/cc-rc). If a
+# second chart is ever added, tags will need a chart-scoped scheme
+# (e.g. cc-rc-vX.Y.Z) and this workflow will need to key off that.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+env:
+  CHART_DIR: charts/cc-rc
+  CHART_NAME: cc-rc
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v7
+
+      - name: Parse tag
+        id: tag
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          # vX.Y.Z with an optional -suffix (suffix may itself contain dots,
+          # per SemVer 2 pre-release identifiers).
+          if [[ ! "$tag" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)(-([0-9A-Za-z.]+))?$ ]]; then
+            echo "::error::Tag '$tag' is not a valid vX.Y.Z[-suffix] semver tag"
+            exit 1
+          fi
+          core="${BASH_REMATCH[1]}"
+          suffix="${BASH_REMATCH[3]:-}"
+          version="$core"
+          if [[ -n "$suffix" ]]; then
+            version="$core-$suffix"
+          fi
+
+          # release_mode: stable (no suffix) | rc (-rcN suffix) | other (any
+          # other suffix). Only "stable" and "rc" get a GitHub Release.
+          if [[ -z "$suffix" ]]; then
+            release_mode=stable
+          elif [[ "$suffix" =~ ^rc[0-9]*$ ]]; then
+            release_mode=rc
+          else
+            release_mode=other
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "release_mode=$release_mode" >> "$GITHUB_OUTPUT"
+          echo "Resolved version=$version release_mode=$release_mode"
+
+      - name: Set chart version
+        run: |
+          set -euo pipefail
+          sed -i "s/^version: .*/version: ${{ steps.tag.outputs.version }}/" "$CHART_DIR/Chart.yaml"
+          grep -E '^(version|appVersion):' "$CHART_DIR/Chart.yaml"
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v5
+
+      - name: Install helm-unittest plugin
+        # --verify=false works around helm-unittest not yet supporting Helm
+        # v4's plugin verification: https://github.com/helm-unittest/helm-unittest/issues/777
+        run: helm plugin install https://github.com/helm-unittest/helm-unittest --verify=false
+
+      - name: helm lint
+        run: helm lint "$CHART_DIR"
+
+      - name: helm unittest
+        run: helm unittest "$CHART_DIR"
+
+      - name: Package chart
+        run: helm package "$CHART_DIR" --destination .
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push chart to GHCR (OCI)
+        run: |
+          set -euo pipefail
+          helm push "${CHART_NAME}-${{ steps.tag.outputs.version }}.tgz" "oci://ghcr.io/${{ github.repository_owner }}/charts"
+
+      - name: Publish chart to the gh-pages Helm repo
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          repo_name="${GITHUB_REPOSITORY#*/}"
+          pages_url="https://${{ github.repository_owner }}.github.io/${repo_name}/"
+          package="${CHART_NAME}-${{ steps.tag.outputs.version }}.tgz"
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          workdir=$(mktemp -d)
+
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+            git clone --branch gh-pages --depth 1 "$remote" "$workdir"
+          else
+            git clone --depth 1 "$remote" "$workdir"
+            (cd "$workdir" && git checkout --orphan gh-pages && git rm -rf . >/dev/null 2>&1 || true)
+          fi
+
+          cp "$package" "$workdir/"
+          merge_flag=()
+          if [ -f "$workdir/index.yaml" ]; then
+            merge_flag=(--merge "$workdir/index.yaml")
+          fi
+          helm repo index "$workdir" --url "$pages_url" "${merge_flag[@]}"
+
+          cd "$workdir"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "chart: publish ${CHART_NAME} ${{ steps.tag.outputs.version }}"
+          git push origin gh-pages
+
+      - name: Create GitHub Release
+        if: steps.tag.outputs.release_mode != 'other'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          prerelease_flag=()
+          if [ "${{ steps.tag.outputs.release_mode }}" = "rc" ]; then
+            prerelease_flag=(--prerelease)
+          fi
+          gh release create "${GITHUB_REF_NAME}" \
+            "${CHART_NAME}-${{ steps.tag.outputs.version }}.tgz" \
+            --title "${CHART_NAME} ${{ steps.tag.outputs.version }}" \
+            --generate-notes \
+            "${prerelease_flag[@]}"
