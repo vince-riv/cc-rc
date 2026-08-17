@@ -61,7 +61,17 @@ RUN update-alternatives --install /usr/bin/go go /usr/lib/go-1.25/bin/go 125 \
 # separate copies against 1.25 and 1.26.
 RUN GOBIN=/usr/local/bin go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest \
  && GOBIN=/usr/local/bin go install github.com/go-delve/delve/cmd/dlv@latest \
+ && GOBIN=/usr/local/bin go install github.com/norwoodj/helm-docs/cmd/helm-docs@latest \
  && rm -rf /root/go /root/.cache/go-build
+
+# Helm: official install script, which downloads the release tarball and
+# verifies it against the published checksum itself. Pinned to the latest
+# v4 tag so we don't pull a v3 release.
+RUN set -eu; \
+    version="$(curl -fsSL https://api.github.com/repos/helm/helm/releases \
+        | grep -oP '"tag_name":\s*"\Kv4[^"]+' | head -1)"; \
+    curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 \
+        | DESIRED_VERSION="${version}" bash
 
 # GitHub CLI: fetch the latest release binary straight from GitHub instead
 # of Ubuntu's apt package, which trails upstream by a wide margin.
@@ -97,6 +107,10 @@ WORKDIR /home/dev
 RUN curl -fsSL https://claude.ai/install.sh | bash
 
 ENV PATH="/home/dev/.local/bin:${PATH}"
+
+# helm unittest plugin. Installed as `dev`, not root, so it lands under
+# ~dev/.local/share/helm/plugins where the `dev`-run helm will find it.
+RUN helm plugin install https://github.com/helm-unittest/helm-unittest
 
 WORKDIR /workspace
 CMD ["/bin/bash"]
