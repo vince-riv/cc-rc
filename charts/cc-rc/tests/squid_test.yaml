@@ -11,8 +11,14 @@ set:
 tests:
   - it: renders a squid Deployment with the configured image and replica count
     template: deployment-squid.yaml
+    # image.tag is set explicitly here rather than relying on values.yaml's
+    # default, since Renovate rewrites that default to a digest-pinned tag
+    # (e.g. "7.2-26.04_edge@sha256:...") and this test should stay stable
+    # regardless of what that default currently is.
     set:
       proxy.replicaCount: 2
+      proxy.image.repository: ubuntu/squid
+      proxy.image.tag: 7.2-26.04_edge
     asserts:
       - isKind:
           of: Deployment
