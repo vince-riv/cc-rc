@@ -1,16 +1,22 @@
 name: Chart Release
 
-# Triggers on semver-ish tags: vX.Y.Z, optionally with a "-suffix"
-# (e.g. v1.2.3, v1.2.3-rc1, v1.2.3-beta.2). The glob below is a coarse
-# pre-filter; the tag is strictly validated in the "Parse tag" step.
+# Triggers on semver-ish tags: X.Y.Z, optionally with a "-suffix"
+# (e.g. 1.2.3, 1.2.3-rc1, 1.2.3-beta.2). GitHub's tag-filter glob has no
+# \d or + quantifier, so "[0-9]*.[0-9]*.[0-9]*" (each segment must start
+# with a digit) is as tight as it gets here. Listed explicitly alongside
+# a "-*" suffixed variant rather than relying on the bare pattern's
+# trailing "*" to also cover "-rc1"-style suffixes - either way, this is
+# just a pre-filter, since the tag is strictly validated against a real
+# regex in the "Parse tag" step below.
 #
 # NOTE: this assumes a single chart in the repo (charts/cc-rc). If a
 # second chart is ever added, tags will need a chart-scoped scheme
-# (e.g. cc-rc-vX.Y.Z) and this workflow will need to key off that.
+# (e.g. cc-rc-X.Y.Z) and this workflow will need to key off that.
 on:
   push:
     tags:
-      - "v*.*.*"
+      - "[0-9]*.[0-9]*.[0-9]*"
+      - "[0-9]*.[0-9]*.[0-9]*-*"
 
 env:
   CHART_DIR: charts/cc-rc
@@ -33,10 +39,10 @@ jobs:
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
-          # vX.Y.Z with an optional -suffix (suffix may itself contain dots,
+          # X.Y.Z with an optional -suffix (suffix may itself contain dots,
           # per SemVer 2 pre-release identifiers).
-          if [[ ! "$tag" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)(-([0-9A-Za-z.]+))?$ ]]; then
-            echo "::error::Tag '$tag' is not a valid vX.Y.Z[-suffix] semver tag"
+          if [[ ! "$tag" =~ ^([0-9]+\.[0-9]+\.[0-9]+)(-([0-9A-Za-z.]+))?$ ]]; then
+            echo "::error::Tag '$tag' is not a valid X.Y.Z[-suffix] semver tag"
             exit 1
           fi
           core="${BASH_REMATCH[1]}"
