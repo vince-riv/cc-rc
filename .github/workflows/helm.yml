@@ -5,10 +5,12 @@ on:
     branches: [main]
     paths:
       - "charts/**"
+      - "!charts/**/README.md"
       - ".github/workflows/helm.yml"
   pull_request:
     paths:
       - "charts/**"
+      - "!charts/**/README.md"
       - ".github/workflows/helm.yml"
 
 permissions:
