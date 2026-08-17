@@ -1,0 +1,60 @@
+name: Helm
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "charts/**"
+      - ".github/workflows/helm.yml"
+  pull_request:
+    paths:
+      - "charts/**"
+      - ".github/workflows/helm.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  helm:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v7
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Install helm-unittest plugin
+        run: helm plugin install https://github.com/helm-unittest/helm-unittest
+
+      - name: helm lint
+        run: |
+          set -e
+          for chart in charts/*/; do
+            helm lint "$chart"
+          done
+
+      - name: helm unittest
+        run: |
+          set -e
+          for chart in charts/*/; do
+            helm unittest "$chart"
+          done
+
+      - name: Install helm-docs
+        run: |
+          set -e
+          version=$(curl -fsSL https://api.github.com/repos/norwoodj/helm-docs/releases/latest | grep -m1 '"tag_name"' | cut -d '"' -f4 | sed 's/^v//')
+          curl -fsSL "https://github.com/norwoodj/helm-docs/releases/download/v${version}/helm-docs_${version}_Linux_x86_64.tar.gz" | tar xz helm-docs
+          sudo mv helm-docs /usr/local/bin/helm-docs
+
+      - name: Run helm-docs
+        run: helm-docs -c charts
+
+      - name: Commit generated docs back to the branch
+        if: github.event_name == 'push'
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "docs: regenerate Helm chart README via helm-docs"
+          file_pattern: "charts/**/README.md"
