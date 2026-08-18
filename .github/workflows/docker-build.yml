@@ -10,6 +10,10 @@ on:
     paths:
       - Dockerfile
       - .github/workflows/docker-build.yml
+  # Weekly rebuild so base image / apt / go install@latest updates land
+  # even without a Dockerfile change. Wednesdays at 07:30 UTC.
+  schedule:
+    - cron: '30 7 * * 3'
 
 env:
   REGISTRY: ghcr.io
@@ -43,7 +47,9 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # PR builds get `pr-<number>` and `sha-<short>`; pushes to main also
-      # get `latest`, on top of the same `sha-<short>` tag.
+      # get `latest`, on top of the same `sha-<short>` tag. The weekly cron
+      # run additionally gets a `YYYYMMDD-HHmm` tag (type=schedule only
+      # fires on the `schedule` event).
       - name: Derive image tags
         id: meta
         uses: docker/metadata-action@v6
@@ -53,6 +59,7 @@ jobs:
             type=ref,event=pr
             type=sha,format=short
             type=raw,value=latest,enable={{is_default_branch}}
+            type=schedule,pattern={{date 'YYYYMMDD-HHmm'}}
 
       # PRs build amd64 only, no QEMU cross-build needed. Pushing is skipped
       # for fork PRs — their GITHUB_TOKEN is read-only against GHCR anyway.
