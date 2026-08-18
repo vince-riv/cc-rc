@@ -18,6 +18,37 @@ github:
   # -- Key used inside the chart-managed Secret.
   secretKey: "token"
 
+# -- Git identity and global config for the `dev` user inside each agent, rendered
+# into ~/.gitconfig and ~/.gitignore_global via a ConfigMap. Commit signing is
+# intentionally not configured here.
+git:
+  # -- Commit author name. Required.
+  name: ""
+  # -- Commit author email. Required.
+  email: ""
+  # -- core.editor. Left unset (no editor configured) when empty.
+  editor: ""
+  # -- init.defaultBranch
+  defaultBranch: main
+  # -- push.default
+  pushDefault: upstream
+  # -- push.autoSetupRemote
+  autoSetupRemote: true
+  # -- color.ui
+  colorUi: auto
+  # -- log.decorate
+  logDecorate: short
+  # -- Patterns written to ~/.gitignore_global and wired up via core.excludesfile.
+  globalIgnore:
+    - "*~"
+    - ".*.swp"
+    - ".DS_Store"
+    - "/target"
+    - "*.egg-info"
+    - "*.pyc"
+    - "__pycache__"
+    - "**/.claude/settings.local.json"
+
 # -- One StatefulSet is created per entry. `org`/`repo` are the GitHub org and repo name.
 # Optional per-entry `resources` and `storage` override the defaults below. `resources`
 # is deep-merged over the top-level `resources` default, so a repo can override just

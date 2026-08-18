@@ -3,6 +3,9 @@ templates:
   - networkpolicy-agent.yaml
 set:
   github.token: dummy-token
+  git:
+    name: CI Bot
+    email: ci@example.com
   repos:
     - org: myorg
       repo: myrepo

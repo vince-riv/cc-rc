@@ -24,6 +24,8 @@ repo, each behind a locked-down [Squid](https://www.squid-cache.org/) egress pro
     `Service`, and `GH_TOKEN` from a `Secret`
 - A `NetworkPolicy` that denies all egress from the agent `StatefulSet` pods except to
   the Squid `Service` and to cluster DNS.
+- A `ConfigMap` rendering `~/.gitconfig` and `~/.gitignore_global` for the `dev` user,
+  mounted read-only into every agent.
 
 ## Configuring GitHub auth
 
@@ -57,6 +59,20 @@ repos:
         cpu: "2"          # memory still comes from the default above
 ```
 
+## Configuring git identity
+
+`git.name` and `git.email` are required — the chart fails to render without them, since
+they're the commit identity every agent uses. Commit signing is intentionally not
+configured. The rest of `git.*` mirrors common `~/.gitconfig` defaults (push/log/init
+behavior, `color.ui`), plus `git.globalIgnore`, a list of patterns written to
+`~/.gitignore_global`:
+
+```yaml
+git:
+  name: "CI Bot"
+  email: "ci@example.com"
+```
+
 ## Configuring egress
 
 `proxy.allowList` empty (default) = open-web mode: any destination is reachable on
@@ -85,7 +101,8 @@ mode — add `github.com` to `proxy.allowList` yourself if you need it there.
 helm lint charts/cc-rc
 helm template cc-rc charts/cc-rc \
   --set repos[0].org=myorg --set repos[0].repo=myrepo \
-  --set github.token=dummy
+  --set github.token=dummy \
+  --set git.name="CI Bot" --set git.email=ci@example.com
 helm unittest charts/cc-rc
 ```
 

@@ -1,4 +1,5 @@
 {{- include "cc-rc.validateGithubAuth" . -}}
+{{- include "cc-rc.validateGitIdentity" . -}}
 {{- $root := . -}}
 {{- $proxyURL := printf "http://%s.%s.svc.cluster.local:%v" (include "cc-rc.squidServiceName" .) .Release.Namespace .Values.proxy.service.port -}}
 {{- $noProxy := "localhost,127.0.0.1,.svc,.svc.cluster.local,.cluster.local" -}}
@@ -90,6 +91,12 @@ spec:
           volumeMounts:
             - name: workspace
               mountPath: /workspace
+            - name: gitconfig
+              mountPath: /home/dev/.gitconfig
+              subPath: .gitconfig
+            - name: gitconfig
+              mountPath: /home/dev/.gitignore_global
+              subPath: .gitignore_global
       containers:
         - name: agent
           image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
@@ -118,10 +125,20 @@ spec:
               mountPath: /home/dev/.claude
             - name: workspace
               mountPath: /workspace
+            - name: gitconfig
+              mountPath: /home/dev/.gitconfig
+              subPath: .gitconfig
+            - name: gitconfig
+              mountPath: /home/dev/.gitignore_global
+              subPath: .gitignore_global
           {{- with $resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+      volumes:
+        - name: gitconfig
+          configMap:
+            name: {{ include "cc-rc.fullname" $root }}-gitconfig
   volumeClaimTemplates:
     - metadata:
         name: claude-home

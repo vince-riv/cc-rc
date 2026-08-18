@@ -3,6 +3,9 @@ templates:
   - statefulset-repo.yaml
 set:
   github.token: dummy-token
+  git:
+    name: CI Bot
+    email: ci@example.com
 tests:
   - it: renders a headless Service and a StatefulSet named after the org/repo slug
     set:
@@ -208,6 +211,41 @@ tests:
           content:
             name: workspace
             mountPath: /workspace
+
+  - it: mounts the gitconfig ConfigMap into both containers
+    set:
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.initContainers[0].volumeMounts
+          content:
+            name: gitconfig
+            mountPath: /home/dev/.gitconfig
+            subPath: .gitconfig
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: gitconfig
+            mountPath: /home/dev/.gitconfig
+            subPath: .gitconfig
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: gitconfig
+            mountPath: /home/dev/.gitignore_global
+            subPath: .gitignore_global
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.volumes
+          content:
+            name: gitconfig
+            configMap:
+              name: RELEASE-NAME-cc-rc-gitconfig
 
   - it: renders one StatefulSet per repo entry
     set:

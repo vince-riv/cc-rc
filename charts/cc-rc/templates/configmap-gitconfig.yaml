@@ -1,0 +1,35 @@
+{{- include "cc-rc.validateGitIdentity" . -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cc-rc.fullname" . }}-gitconfig
+  labels:
+    {{- include "cc-rc.labels" . | nindent 4 }}
+data:
+  .gitconfig: |
+    [user]
+    	name = {{ .Values.git.name }}
+    	email = {{ .Values.git.email }}
+    [color]
+    	ui = {{ .Values.git.colorUi }}
+    [core]
+    	{{- if .Values.git.editor }}
+    	editor = {{ .Values.git.editor }}
+    	{{- end }}
+    	excludesfile = /home/dev/.gitignore_global
+    [push]
+    	default = {{ .Values.git.pushDefault }}
+    	autoSetupRemote = {{ .Values.git.autoSetupRemote }}
+    [log]
+    	decorate = {{ .Values.git.logDecorate }}
+    [init]
+    	defaultBranch = {{ .Values.git.defaultBranch }}
+    [safe]
+    	# PVC-mounted /workspace may be owned differently than the container
+    	# user depending on the CSI driver, which git otherwise refuses to
+    	# operate on ("detected dubious ownership in repository").
+    	directory = *
+  .gitignore_global: |
+    {{- range .Values.git.globalIgnore }}
+    {{ . }}
+    {{- end }}

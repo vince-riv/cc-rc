@@ -1,0 +1,96 @@
+suite: dev gitconfig (happy path)
+templates:
+  - configmap-gitconfig.yaml
+set:
+  github.token: dummy-token
+  git:
+    name: CI Bot
+    email: ci@example.com
+  repos:
+    - org: myorg
+      repo: myrepo
+tests:
+  - it: renders .gitconfig with the required identity and default settings
+    asserts:
+      - isKind:
+          of: ConfigMap
+      - matchRegex:
+          path: data[".gitconfig"]
+          pattern: "name = CI Bot"
+      - matchRegex:
+          path: data[".gitconfig"]
+          pattern: "email = ci@example.com"
+      - matchRegex:
+          path: data[".gitconfig"]
+          pattern: "excludesfile = /home/dev/.gitignore_global"
+      - matchRegex:
+          path: data[".gitconfig"]
+          pattern: "default = upstream"
+      - matchRegex:
+          path: data[".gitconfig"]
+          pattern: "defaultBranch = main"
+      - matchRegex:
+          path: data[".gitconfig"]
+          pattern: "directory = \\*"
+      - notMatchRegex:
+          path: data[".gitconfig"]
+          pattern: "gpgsign|signingkey"
+
+  - it: does not set core.editor when git.editor is empty
+    asserts:
+      - notMatchRegex:
+          path: data[".gitconfig"]
+          pattern: "editor ="
+
+  - it: sets core.editor when git.editor is provided
+    set:
+      git:
+        name: CI Bot
+        email: ci@example.com
+        editor: vim
+    asserts:
+      - matchRegex:
+          path: data[".gitconfig"]
+          pattern: "editor = vim"
+
+  - it: renders the default global gitignore patterns
+    asserts:
+      - matchRegex:
+          path: data[".gitignore_global"]
+          pattern: "(?m)^\\.DS_Store$"
+      - matchRegex:
+          path: data[".gitignore_global"]
+          pattern: "(?m)^\\*\\*/\\.claude/settings\\.local\\.json$"
+
+  - it: honors a custom global gitignore list
+    set:
+      git:
+        name: CI Bot
+        email: ci@example.com
+        globalIgnore:
+          - "*.tmp"
+    asserts:
+      - matchRegex:
+          path: data[".gitignore_global"]
+          pattern: "(?m)^\\*\\.tmp$"
+      - notMatchRegex:
+          path: data[".gitignore_global"]
+          pattern: "\\.DS_Store"
+
+  - it: fails when git.name is not set
+    set:
+      git:
+        name: ""
+        email: ci@example.com
+    asserts:
+      - failedTemplate:
+          errorMessage: "git.name must be set (the commit identity used inside each agent)."
+
+  - it: fails when git.email is not set
+    set:
+      git:
+        name: CI Bot
+        email: ""
+    asserts:
+      - failedTemplate:
+          errorMessage: "git.email must be set (the commit identity used inside each agent)."

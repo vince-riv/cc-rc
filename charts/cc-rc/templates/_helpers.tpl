@@ -96,3 +96,16 @@ Secret to exist (fails the whole render if misconfigured).
 {{ fail "one of github.token or github.existingSecret must be set." }}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Validate git identity configuration. Call from any template that needs
+the .gitconfig ConfigMap to exist (fails the whole render if unset).
+*/}}
+{{- define "cc-rc.validateGitIdentity" -}}
+{{- if not .Values.git.name -}}
+{{ fail "git.name must be set (the commit identity used inside each agent)." }}
+{{- end -}}
+{{- if not .Values.git.email -}}
+{{ fail "git.email must be set (the commit identity used inside each agent)." }}
+{{- end -}}
+{{- end -}}
