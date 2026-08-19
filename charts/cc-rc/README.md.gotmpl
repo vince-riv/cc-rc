@@ -19,7 +19,7 @@ repo, each behind a locked-down [Squid](https://www.squid-cache.org/) egress pro
   `ghcr.io/vince-riv/cc-rc` image. Each gets:
   - a 500Mi PVC mounted at `/home/dev/.claude`
   - a 5Gi PVC mounted at `/workspace`
-  - an init container that clones the repo into `/workspace` (skipped if already cloned)
+  - an init container that clones the repo into `/workspace/repo` (skipped if already cloned)
   - `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` (+ lowercase variants) pointed at the Squid
     `Service`, and `GH_TOKEN` from a `Secret`
 - A `NetworkPolicy` that denies all egress from the agent `StatefulSet` pods except to
