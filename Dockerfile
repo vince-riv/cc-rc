@@ -63,6 +63,8 @@ RUN update-alternatives --install /usr/bin/go go /usr/lib/go-1.25/bin/go 125 \
 RUN GOBIN=/usr/local/bin go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest \
  && GOBIN=/usr/local/bin go install github.com/go-delve/delve/cmd/dlv@latest \
  && GOBIN=/usr/local/bin go install github.com/norwoodj/helm-docs/cmd/helm-docs@latest \
+ && GOBIN=/usr/local/bin go install github.com/google/go-containerregistry/cmd/crane@latest \
+ && GOBIN=/usr/local/bin go install github.com/google/go-containerregistry/cmd/krane@latest \
  && rm -rf /root/go /root/.cache/go-build
 
 # Helm: official install script, which downloads the release tarball and
