@@ -24,10 +24,13 @@ spec:
         - name: squid
           image: "{{ .Values.proxy.image.repository }}:{{ .Values.proxy.image.tag }}"
           imagePullPolicy: {{ .Values.proxy.image.pullPolicy }}
-          args:
-            - "-f"
-            - "/etc/squid/squid.conf"
-            - "-N"
+          # No command/args override: this is a Canonical "rock" image whose
+          # ENTRYPOINT is `pebble enter`, not squid itself - Pebble's own
+          # baked-in service layer already starts squid with
+          # `-f /etc/squid/squid.conf -NYC` (see
+          # /var/lib/pebble/default/layers/*-rockcraft-squid.yaml in the
+          # image). Passing args here would go to `pebble enter`, which
+          # doesn't understand squid's flags and crashloops.
           ports:
             - name: squid
               containerPort: {{ .Values.proxy.service.port }}
