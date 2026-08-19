@@ -60,11 +60,15 @@ RUN update-alternatives --install /usr/bin/go go /usr/lib/go-1.25/bin/go 125 \
 # DWARF from whatever binary you point it at). Which Go compiled the tool
 # itself doesn't matter here, so there's nothing to gain from building
 # separate copies against 1.25 and 1.26.
+#
+# crane/krane pinned to a tagged release, not @latest: go-containerregistry's
+# main branch go.mod carries `replace` directives, which `go install` refuses
+# to honor for anything but the main module — @latest fails outright.
 RUN GOBIN=/usr/local/bin go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest \
  && GOBIN=/usr/local/bin go install github.com/go-delve/delve/cmd/dlv@latest \
  && GOBIN=/usr/local/bin go install github.com/norwoodj/helm-docs/cmd/helm-docs@latest \
- && GOBIN=/usr/local/bin go install github.com/google/go-containerregistry/cmd/crane@latest \
- && GOBIN=/usr/local/bin go install github.com/google/go-containerregistry/cmd/krane@latest \
+ && GOBIN=/usr/local/bin go install github.com/google/go-containerregistry/cmd/crane@v0.21.9 \
+ && GOBIN=/usr/local/bin go install github.com/google/go-containerregistry/cmd/krane@v0.21.9 \
  && rm -rf /root/go /root/.cache/go-build
 
 # Helm: official install script, which downloads the release tarball and
