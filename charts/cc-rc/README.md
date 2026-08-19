@@ -24,6 +24,30 @@ repo, each behind a locked-down [Squid](https://www.squid-cache.org/) egress pro
 - A `ConfigMap` rendering `~/.gitconfig` and `~/.gitignore_global` for the `dev` user,
   mounted read-only into every agent.
 
+## Installing
+
+Published releases (see `.github/workflows/chart-release.yml`) are pushed to GHCR as an
+OCI artifact:
+
+```sh
+helm install cc-rc oci://ghcr.io/vince-riv/charts/cc-rc --version 0.1.0 \
+  --set repos[0].org=myorg --set repos[0].repo=myrepo \
+  --set github.token=ghp_... \
+  --set git.name="CI Bot" --set git.email=ci@example.com
+```
+
+They're also published to the gh-pages-backed Helm repo at
+`https://vince-riv.github.io/cc-rc/`:
+
+```sh
+helm repo add cc-rc https://vince-riv.github.io/cc-rc/
+helm repo update
+helm install cc-rc cc-rc/cc-rc --version 0.1.0 \
+  --set repos[0].org=myorg --set repos[0].repo=myrepo \
+  --set github.token=ghp_... \
+  --set git.name="CI Bot" --set git.email=ci@example.com
+```
+
 ## Configuring GitHub auth
 
 Set exactly one of:
