@@ -31,6 +31,14 @@ spec:
           # /var/lib/pebble/default/layers/*-rockcraft-squid.yaml in the
           # image). Passing args here would go to `pebble enter`, which
           # doesn't understand squid's flags and crashloops.
+          env:
+            # squid.conf sends access_log/cache_log to /dev/stdout, but
+            # Pebble (this image's PID 1) only relays service output to
+            # its own stdout - which is what `kubectl logs`/stern show -
+            # when running verbose; otherwise it's only visible via
+            # `pebble logs squid` inside the container.
+            - name: PEBBLE_VERBOSE
+              value: "1"
           ports:
             - name: squid
               containerPort: {{ .Values.proxy.service.port }}

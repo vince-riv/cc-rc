@@ -169,6 +169,11 @@ Setting `proxy.allowList` switches to strict mode: only those domains/CIDRs (por
 mode — add `github.com` to `proxy.allowList` yourself if you need it there.
 `proxy.denyList` always wins over `proxy.allowList`.
 
+Squid's access/cache logs go to `kubectl logs`/`stern` on the squid `Deployment` pod —
+`squid.conf` sends them to `/dev/stdout`, and `PEBBLE_VERBOSE=1` makes the base image's
+Pebble entrypoint relay that to its own stdout (otherwise it's only visible via
+`kubectl exec <squid-pod> -- pebble logs squid`).
+
 {{ template "chart.maintainersSection" . }}
 
 {{ template "chart.sourcesSection" . }}

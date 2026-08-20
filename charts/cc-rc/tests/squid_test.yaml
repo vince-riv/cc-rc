@@ -38,6 +38,15 @@ tests:
           path: spec.template.metadata.labels["app.kubernetes.io/component"]
           value: proxy
 
+  - it: sets PEBBLE_VERBOSE so squid's access/cache logs reach kubectl logs/stern
+    template: deployment-squid.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PEBBLE_VERBOSE
+            value: "1"
+
   - it: renders a squid ClusterIP Service on the proxy port
     template: service-squid.yaml
     asserts:
@@ -73,6 +82,16 @@ tests:
       - matchRegex:
           path: data["squid.conf"]
           pattern: "acl default_blocked_cidrs dst 192.168.0.0/16 10.0.0.0/8 172.16.0.0/12"
+
+  - it: sends access_log and cache_log to stdout instead of the default log files
+    template: configmap-squid.yaml
+    asserts:
+      - matchRegex:
+          path: data["squid.conf"]
+          pattern: "access_log stdio:/dev/stdout squid"
+      - matchRegex:
+          path: data["squid.conf"]
+          pattern: "cache_log /dev/stdout"
 
   - it: strict allow-list mode restricts to allowed destinations with no ssh carve-out
     template: configmap-squid.yaml
