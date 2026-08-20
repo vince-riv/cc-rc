@@ -23,6 +23,7 @@ cat > ~/.claude/settings.json <<'EOF'
       "Edit(/workspace/repo/**)"
     ]
   },
-  "outputStyle": "STE100 + ADHD"
+  "outputStyle": "STE100 + ADHD",
+  "theme": "auto"
 }
 EOF
