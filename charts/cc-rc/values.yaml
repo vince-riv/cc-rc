@@ -76,7 +76,7 @@ repos: []
 storage:
   # -- Size of the PVC mounted at /home/dev (the dev user's entire home directory —
   # claude config/credentials, shell history, etc. — not just ~/.claude).
-  homeSize: 500Mi
+  homeSize: 5Gi
   # -- Size of the PVC mounted at /workspace
   workspaceSize: 5Gi
   # -- StorageClass for both PVCs. "" uses the cluster default.

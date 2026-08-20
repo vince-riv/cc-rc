@@ -14,7 +14,7 @@ repo, each behind a locked-down [Squid](https://www.squid-cache.org/) egress pro
   chart with unrestricted egress.
 - One `StatefulSet` (replicas: 1) per entry in `values.repos`, running the
   `ghcr.io/vince-riv/cc-rc` image. Each gets:
-  - a 500Mi PVC mounted at `/home/dev` — the `dev` user's entire home directory, not
+  - a 5Gi PVC mounted at `/home/dev` — the `dev` user's entire home directory, not
     just `~/.claude`
   - a 5Gi PVC mounted at `/workspace`
   - a `seed-home` init container that syncs the image's baked-in `/home/dev` onto the
@@ -193,8 +193,8 @@ mode — add `github.com` to `proxy.allowList` yourself if you need it there.
 | remoteControl | object | `{"capacity":8,"permissionMode":"bypassPermissions","spawn":"worktree"}` | Defaults for the `claude remote-control` invocation each agent runs once login is complete (see the seed-home/clone-repo init containers and the agent container's startup logic). Any of these can be overridden per-repo via `repos[].remoteControl`. |
 | repos | list | `[]` | One StatefulSet is created per entry. `org`/`repo` are the GitHub org and repo name. Optional per-entry `resources`, `storage`, and `remoteControl` override the defaults below. `resources` is deep-merged over the top-level `resources` default, so a repo can override just cpu or just memory without having to repeat the other. |
 | resources | object | `{}` | Default container resources for the per-repo agent container. Empty means no requests/limits are set. |
-| storage | object | `{"homeSize":"500Mi","storageClassName":"","workspaceSize":"5Gi"}` | Default persistent volume sizes for each per-repo agent. |
-| storage.homeSize | string | `"500Mi"` | Size of the PVC mounted at /home/dev (the dev user's entire home directory — claude config/credentials, shell history, etc. — not just ~/.claude). |
+| storage | object | `{"homeSize":"5Gi","storageClassName":"","workspaceSize":"5Gi"}` | Default persistent volume sizes for each per-repo agent. |
+| storage.homeSize | string | `"5Gi"` | Size of the PVC mounted at /home/dev (the dev user's entire home directory — claude config/credentials, shell history, etc. — not just ~/.claude). |
 | storage.storageClassName | string | `""` | StorageClass for both PVCs. "" uses the cluster default. |
 | storage.workspaceSize | string | `"5Gi"` | Size of the PVC mounted at /workspace |
 

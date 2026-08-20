@@ -61,7 +61,7 @@ tests:
       - documentIndex: 1
         equal:
           path: spec.volumeClaimTemplates[0].spec.resources.requests.storage
-          value: 500Mi
+          value: 5Gi
       - documentIndex: 1
         equal:
           path: spec.volumeClaimTemplates[1].metadata.name
