@@ -225,7 +225,19 @@ tests:
       - documentIndex: 1
         matchRegex:
           path: spec.template.spec.initContainers[0].args[0]
-          pattern: "cp -a --no-preserve=timestamps /home/dev/\\. /mnt/home-pvc/"
+          pattern: "rsync -a --no-times --ignore-times"
+      - documentIndex: 1
+        matchRegex:
+          path: spec.template.spec.initContainers[0].args[0]
+          pattern: "/home/dev/\\.claude/\\. /mnt/home-pvc/\\.claude/"
+      - documentIndex: 1
+        matchRegex:
+          path: spec.template.spec.initContainers[0].args[0]
+          pattern: "rsync -a --delete --no-times"
+      - documentIndex: 1
+        matchRegex:
+          path: spec.template.spec.initContainers[0].args[0]
+          pattern: "--exclude=\\.claude --exclude=\\.cc-rc"
       - documentIndex: 1
         contains:
           path: spec.template.spec.initContainers[0].volumeMounts

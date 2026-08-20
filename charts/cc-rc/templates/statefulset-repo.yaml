@@ -74,16 +74,17 @@ spec:
           args:
             - |
               set -euo pipefail
-              # Overwrite files the image ships (so e.g. an updated
-              # ~/.claude/settings.json lands on the PVC), but never delete
-              # anything already on the PVC that the image doesn't have -
-              # cp -a without --delete is exactly that: recursive, permissions
-              # preserved, existing-but-not-in-source files left alone.
-              # --no-preserve=timestamps: some CSI drivers reject utime() on
-              # the PVC mountpoint itself ("Operation not permitted"), which
-              # cp -a otherwise treats as a fatal error even though the copy
-              # itself succeeded.
-              cp -a --no-preserve=timestamps /home/dev/. /mnt/home-pvc/
+              # ~/.claude/: overwrite from image, never delete extras
+              # (claude's own state/credentials survive; --ignore-times
+              # forces the overwrite even on a size+mtime match).
+              # Everywhere else: full reset via --delete, except ~/.cc-rc/
+              # (our login-complete marker - must survive every boot).
+              mkdir -p /home/dev/.claude /mnt/home-pvc/.claude
+              rsync -a --no-times --ignore-times \
+                /home/dev/.claude/. /mnt/home-pvc/.claude/
+              rsync -a --delete --no-times \
+                --exclude=.claude --exclude=.cc-rc \
+                /home/dev/. /mnt/home-pvc/
           volumeMounts:
             - name: home
               mountPath: /mnt/home-pvc
