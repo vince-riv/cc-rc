@@ -228,7 +228,9 @@ spec:
           configMap:
             name: {{ include "cc-rc.fullname" $root }}-gitconfig
   volumeClaimTemplates:
-    - metadata:
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
         name: home
       spec:
         accessModes: ["ReadWriteOnce"]
@@ -238,7 +240,9 @@ spec:
         resources:
           requests:
             storage: {{ $homeSize }}
-    - metadata:
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
         name: workspace
       spec:
         accessModes: ["ReadWriteOnce"]
