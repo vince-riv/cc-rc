@@ -225,7 +225,7 @@ tests:
       - documentIndex: 1
         matchRegex:
           path: spec.template.spec.initContainers[0].args[0]
-          pattern: "rsync -a --no-times --ignore-times"
+          pattern: "rsync -a --no-times --no-owner --no-group --ignore-times"
       - documentIndex: 1
         matchRegex:
           path: spec.template.spec.initContainers[0].args[0]
@@ -233,7 +233,7 @@ tests:
       - documentIndex: 1
         matchRegex:
           path: spec.template.spec.initContainers[0].args[0]
-          pattern: "rsync -a --delete --no-times"
+          pattern: "rsync -a --delete --no-times --no-owner --no-group"
       - documentIndex: 1
         matchRegex:
           path: spec.template.spec.initContainers[0].args[0]
