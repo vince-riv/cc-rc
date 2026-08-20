@@ -78,9 +78,10 @@ RUN useradd -m -s /bin/bash dev \
 USER dev
 WORKDIR /home/dev
 
-# Claude Code (auto-updates on) and the helm unittest plugin, both installed
-# as `dev` so they land under `dev`'s home, not root's.
+# Claude Code (auto-updates on), the helm unittest plugin, and ~/.claude
+# config, all installed as `dev` so they land under `dev`'s home, not root's.
 RUN --mount=type=bind,source=scripts/setup-dev.sh,target=/opt/build-scripts/setup-dev.sh \
+    --mount=type=bind,source=.claude/output-styles/ste100-adhd.md,target=/opt/build-scripts/ste100-adhd.md \
     --mount=type=tmpfs,target=/tmp \
     bash /opt/build-scripts/setup-dev.sh
 
