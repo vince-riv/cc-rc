@@ -21,10 +21,12 @@ repo, each behind a locked-down [Squid](https://www.squid-cache.org/) egress pro
     home PVC on every start, with different rules for `~/.claude/` vs. everywhere else:
     `~/.claude/` files the image ships (e.g. `~/.claude/settings.json`) are always
     overwritten, but anything else already there — extra files, claude's own
-    credentials/session state — is never deleted; everywhere else on the PVC is fully
-    reset to match the image (deleting anything the image doesn't ship), except
-    `~/.cc-rc/` (this chart's own login-complete marker — see "Claude login and
-    remote-control" below)
+    credentials/session state (`~/.claude/.credentials.json`) — is never deleted;
+    everywhere else on the PVC is fully reset to match the image (deleting anything
+    the image doesn't ship), except `~/.cc-rc/` (this chart's own login-complete
+    marker — see "Claude login and remote-control" below) and `~/.claude.json`
+    (claude's own account/session state — a file sibling to the `~/.claude/`
+    directory, not inside it, so it needs its own exclusion)
   - a `clone-repo` init container that clones the repo into `/workspace/repo` (skipped
     if already cloned)
   - `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` (+ lowercase variants) pointed at the Squid
