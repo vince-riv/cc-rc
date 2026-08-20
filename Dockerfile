@@ -32,7 +32,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         yamllint \
         screen \
         tmux \
-        rsync
+        rsync \
+        file
 
 RUN locale-gen en_US.UTF-8 && update-locale LANG=en_US.UTF-8
 ENV LANG=en_US.UTF-8 \
