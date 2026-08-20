@@ -33,8 +33,12 @@ data:
     # kubelet's tcpSocket probes connect then disconnect without sending a
     # request, logging as NONE_NONE/000 - drop those before the catch-all
     # access_log line so they don't spam kubectl logs/stern.
-    acl tcp_probe http_status 0
-    access_log none tcp_probe
+    # (http_status can't be used here: these transactions never reach a
+    # response, so squid can't evaluate it and warns "assuming mismatch".
+    # has_component checks for a parsed request instead, which works even
+    # when the connection closed before headers arrived.)
+    acl has_request has_component request
+    access_log none !has_request
     access_log stdio:/dev/stdout squid
     cache_log /dev/stdout
     refresh_pattern ^ftp:           1440    20%     10080
