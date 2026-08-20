@@ -50,9 +50,9 @@ git:
     - "**/.claude/settings.local.json"
 
 # -- One StatefulSet is created per entry. `org`/`repo` are the GitHub org and repo name.
-# Optional per-entry `resources` and `storage` override the defaults below. `resources`
-# is deep-merged over the top-level `resources` default, so a repo can override just
-# cpu or just memory without having to repeat the other.
+# Optional per-entry `resources`, `storage`, and `remoteControl` override the defaults
+# below. `resources` is deep-merged over the top-level `resources` default, so a repo
+# can override just cpu or just memory without having to repeat the other.
 repos: []
   # - org: myorg
   #   repo: myrepo
@@ -64,17 +64,35 @@ repos: []
   #       cpu: "2"
   #       memory: 4Gi
   #   storage:
-  #     claudeSize: 500Mi
+  #     homeSize: 500Mi
   #     workspaceSize: 5Gi
+  #   remoteControl:
+  #     name: myorg-myrepo          # defaults to the pod hostname when unset
+  #     permissionMode: bypassPermissions
+  #     spawn: worktree
+  #     capacity: 8
 
 # -- Default persistent volume sizes for each per-repo agent.
 storage:
-  # -- Size of the PVC mounted at /home/dev/.claude
-  claudeSize: 500Mi
+  # -- Size of the PVC mounted at /home/dev (the dev user's entire home directory —
+  # claude config/credentials, shell history, etc. — not just ~/.claude).
+  homeSize: 500Mi
   # -- Size of the PVC mounted at /workspace
   workspaceSize: 5Gi
   # -- StorageClass for both PVCs. "" uses the cluster default.
   storageClassName: ""
+
+# -- Defaults for the `claude remote-control` invocation each agent runs once login
+# is complete (see the seed-home/clone-repo init containers and the agent container's
+# startup logic). Any of these can be overridden per-repo via `repos[].remoteControl`.
+remoteControl:
+  # -- --permission-mode. One of: acceptEdits, auto, bypassPermissions, default,
+  # dontAsk, plan.
+  permissionMode: bypassPermissions
+  # -- --spawn. One of: same-dir, worktree, session.
+  spawn: worktree
+  # -- --capacity
+  capacity: 8
 
 # -- Default container resources for the per-repo agent container. Empty means no
 # requests/limits are set.

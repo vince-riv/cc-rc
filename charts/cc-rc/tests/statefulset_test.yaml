@@ -57,7 +57,7 @@ tests:
       - documentIndex: 1
         equal:
           path: spec.volumeClaimTemplates[0].metadata.name
-          value: claude-home
+          value: home
       - documentIndex: 1
         equal:
           path: spec.volumeClaimTemplates[0].spec.resources.requests.storage
@@ -77,7 +77,7 @@ tests:
         - org: myorg
           repo: myrepo
           storage:
-            claudeSize: 1Gi
+            homeSize: 1Gi
             workspaceSize: 20Gi
     asserts:
       - documentIndex: 1
@@ -166,7 +166,7 @@ tests:
           path: spec.template.spec.containers[0].resources.requests.memory
           value: 8Gi
 
-  - it: wires proxy env vars and GH_TOKEN into both the init container and the agent container
+  - it: wires proxy env vars and GH_TOKEN into both the clone-repo init container and the agent container
     set:
       repos:
         - org: myorg
@@ -174,7 +174,7 @@ tests:
     asserts:
       - documentIndex: 1
         contains:
-          path: spec.template.spec.initContainers[0].env
+          path: spec.template.spec.initContainers[1].env
           content:
             name: HTTPS_PROXY
             value: http://RELEASE-NAME-cc-rc-squid.NAMESPACE.svc.cluster.local:3128
@@ -193,7 +193,7 @@ tests:
           path: spec.template.spec.containers[0].env[0].valueFrom.secretKeyRef.key
           value: token
 
-  - it: mounts the claude-home and workspace PVCs at the expected paths
+  - it: mounts the home and workspace PVCs at the expected paths
     set:
       repos:
         - org: myorg
@@ -203,8 +203,8 @@ tests:
         contains:
           path: spec.template.spec.containers[0].volumeMounts
           content:
-            name: claude-home
-            mountPath: /home/dev/.claude
+            name: home
+            mountPath: /home/dev
       - documentIndex: 1
         contains:
           path: spec.template.spec.containers[0].volumeMounts
@@ -212,7 +212,32 @@ tests:
             name: workspace
             mountPath: /workspace
 
-  - it: mounts the gitconfig ConfigMap into both containers
+  - it: seeds the home PVC from the image's home dir without touching /home/dev directly
+    set:
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.initContainers[0].name
+          value: seed-home
+      - documentIndex: 1
+        matchRegex:
+          path: spec.template.spec.initContainers[0].args[0]
+          pattern: "cp -a /home/dev/\\. /mnt/home-pvc/"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.initContainers[0].volumeMounts
+          content:
+            name: home
+            mountPath: /mnt/home-pvc
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.initContainers[1].name
+          value: clone-repo
+
+  - it: mounts the gitconfig ConfigMap into the clone-repo init container and the agent container
     set:
       repos:
         - org: myorg
@@ -220,7 +245,7 @@ tests:
     asserts:
       - documentIndex: 1
         contains:
-          path: spec.template.spec.initContainers[0].volumeMounts
+          path: spec.template.spec.initContainers[1].volumeMounts
           content:
             name: gitconfig
             mountPath: /home/dev/.gitconfig
@@ -282,3 +307,143 @@ tests:
         equal:
           path: spec.template.spec.containers[0].env[0].valueFrom.secretKeyRef.key
           value: gh-pat
+
+  - it: has a readiness probe that checks for a running claude remote-control process
+    set:
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.containers[0].readinessProbe.exec.command
+          value: ["pgrep", "-f", "claude remote-control"]
+
+  - it: the agent bootstrap script checks a login-complete marker, waits for remote-control, then exits
+    set:
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - documentIndex: 1
+        matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: "MARKER=\"\\$MARKER_DIR/login-complete\""
+      - documentIndex: 1
+        matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: "screen -dmS claude-login bash -lic 'claude --no-chrome'"
+      - documentIndex: 1
+        matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: "touch \"\\$MARKER\""
+      - documentIndex: 1
+        matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: "screen -dmS remote-control bash -lic \"claude remote-control --name \\$\\{NAME\\} --permission-mode \\$\\{RC_PERMISSION_MODE\\} --spawn \\$\\{RC_SPAWN\\} --capacity \\$\\{RC_CAPACITY\\}\""
+      - documentIndex: 1
+        matchRegex:
+          path: spec.template.spec.containers[0].args[0]
+          pattern: '-ge 45 \]; then'
+
+  - it: passes the default remote-control settings as env vars, with no name override
+    set:
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RC_NAME
+            value: ""
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RC_PERMISSION_MODE
+            value: "bypassPermissions"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RC_SPAWN
+            value: "worktree"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RC_CAPACITY
+            value: "8"
+
+  - it: a repo can override remote-control name/permissionMode/spawn/capacity independently of the chart default
+    set:
+      remoteControl:
+        permissionMode: plan
+        spawn: session
+        capacity: 4
+      repos:
+        - org: myorg
+          repo: myrepo
+          remoteControl:
+            name: custom-name
+            capacity: 12
+    asserts:
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RC_NAME
+            value: "custom-name"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RC_PERMISSION_MODE
+            value: "plan"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RC_SPAWN
+            value: "session"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RC_CAPACITY
+            value: "12"
+
+  - it: fails when remoteControl.permissionMode is not a recognized value
+    set:
+      remoteControl:
+        permissionMode: not-a-real-mode
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - failedTemplate:
+          errorMessageRegex: "remoteControl.permissionMode must be one of"
+
+  - it: fails when remoteControl.spawn is not a recognized value
+    set:
+      remoteControl:
+        spawn: not-a-real-mode
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - failedTemplate:
+          errorMessageRegex: "remoteControl.spawn must be one of"
+
+  - it: fails when a repo's remoteControl.permissionMode override is not a recognized value
+    set:
+      repos:
+        - org: myorg
+          repo: myrepo
+          remoteControl:
+            permissionMode: not-a-real-mode
+    asserts:
+      - failedTemplate:
+          errorMessageRegex: "repos\\[\\].remoteControl.permissionMode must be one of"

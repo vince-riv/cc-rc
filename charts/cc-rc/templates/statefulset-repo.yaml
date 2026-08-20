@@ -1,14 +1,20 @@
 {{- include "cc-rc.validateGithubAuth" . -}}
 {{- include "cc-rc.validateGitIdentity" . -}}
+{{- include "cc-rc.validateRemoteControl" . -}}
 {{- $root := . -}}
 {{- $proxyURL := printf "http://%s.%s.svc.cluster.local:%v" (include "cc-rc.squidServiceName" .) .Release.Namespace .Values.proxy.service.port -}}
 {{- $noProxy := "localhost,127.0.0.1,.svc,.svc.cluster.local,.cluster.local" -}}
 {{- range $repoEntry := .Values.repos }}
 {{- $slug := include "cc-rc.repoSlug" $repoEntry }}
 {{- $name := printf "%s-%s" (include "cc-rc.fullname" $root) $slug }}
-{{- $claudeSize := ($repoEntry.storage).claudeSize | default $root.Values.storage.claudeSize }}
+{{- $homeSize := ($repoEntry.storage).homeSize | default $root.Values.storage.homeSize }}
 {{- $workspaceSize := ($repoEntry.storage).workspaceSize | default $root.Values.storage.workspaceSize }}
 {{- $resources := mergeOverwrite (deepCopy $root.Values.resources) ($repoEntry.resources | default dict) }}
+{{- $rc := $repoEntry.remoteControl | default dict }}
+{{- $rcPermissionMode := $rc.permissionMode | default $root.Values.remoteControl.permissionMode }}
+{{- $rcSpawn := $rc.spawn | default $root.Values.remoteControl.spawn }}
+{{- $rcCapacity := $rc.capacity | default $root.Values.remoteControl.capacity }}
+{{- $rcName := $rc.name | default "" }}
 ---
 apiVersion: v1
 kind: Service
@@ -57,6 +63,26 @@ spec:
       securityContext:
         fsGroup: {{ $root.Values.podFsGroup }}
       initContainers:
+        - name: seed-home
+          # Mounted at a path other than /home/dev, so the image's baked-in
+          # home dir (e.g. ~/.claude/settings.json) stays visible here and
+          # can be copied onto the home PVC - unlike the agent container,
+          # where the PVC is mounted directly at /home/dev and shadows it.
+          image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              # Overwrite files the image ships (so e.g. an updated
+              # ~/.claude/settings.json lands on the PVC), but never delete
+              # anything already on the PVC that the image doesn't have -
+              # cp -a without --delete is exactly that: recursive, permissions
+              # preserved, existing-but-not-in-source files left alone.
+              cp -a /home/dev/. /mnt/home-pvc/
+          volumeMounts:
+            - name: home
+              mountPath: /mnt/home-pvc
         - name: clone-repo
           image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
           imagePullPolicy: {{ $root.Values.image.pullPolicy }}
@@ -101,7 +127,56 @@ spec:
         - name: agent
           image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
           imagePullPolicy: {{ $root.Values.image.pullPolicy }}
-          command: ["/bin/bash", "-c", "sleep infinity"]
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -uo pipefail
+              MARKER_DIR="/home/dev/.cc-rc"
+              MARKER="$MARKER_DIR/login-complete"
+              mkdir -p "$MARKER_DIR"
+
+              is_remote_control_running() {
+                pgrep -f "claude remote-control" >/dev/null 2>&1
+              }
+
+              if [ ! -f "$MARKER" ]; then
+                echo "No login marker at $MARKER - starting first-time claude login setup."
+                echo "Attach with: kubectl exec -it \$(hostname) -- screen -r claude-login"
+                echo "Then run /login, and once logged in, run: claude remote-control"
+                screen -dmS claude-login bash -lic 'claude --no-chrome'
+
+                echo "Waiting for 'claude remote-control' to be started inside that session..."
+                while ! is_remote_control_running; do
+                  sleep 5
+                done
+
+                echo "Detected claude remote-control running - marking login complete."
+                touch "$MARKER"
+                echo "Exiting so the pod restarts into steady-state mode."
+                exit 0
+              fi
+
+              NAME="${RC_NAME:-$(hostname)}"
+              echo "Login already complete - starting claude remote-control (name=$NAME)."
+              screen -dmS remote-control bash -lic "claude remote-control --name ${NAME} --permission-mode ${RC_PERMISSION_MODE} --spawn ${RC_SPAWN} --capacity ${RC_CAPACITY}"
+
+              down_since=0
+              while true; do
+                if is_remote_control_running; then
+                  down_since=0
+                else
+                  now=$(date +%s)
+                  if [ "$down_since" -eq 0 ]; then
+                    down_since=$now
+                  fi
+                  elapsed=$(( now - down_since ))
+                  if [ "$elapsed" -ge 45 ]; then
+                    echo "claude remote-control has not been running for 45s - exiting."
+                    exit 1
+                  fi
+                fi
+                sleep 5
+              done
           env:
             - name: GH_TOKEN
               valueFrom:
@@ -120,9 +195,22 @@ spec:
               value: {{ $noProxy | quote }}
             - name: no_proxy
               value: {{ $noProxy | quote }}
+            - name: RC_NAME
+              value: {{ $rcName | quote }}
+            - name: RC_PERMISSION_MODE
+              value: {{ $rcPermissionMode | quote }}
+            - name: RC_SPAWN
+              value: {{ $rcSpawn | quote }}
+            - name: RC_CAPACITY
+              value: {{ $rcCapacity | quote }}
+          readinessProbe:
+            exec:
+              command: ["pgrep", "-f", "claude remote-control"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
           volumeMounts:
-            - name: claude-home
-              mountPath: /home/dev/.claude
+            - name: home
+              mountPath: /home/dev
             - name: workspace
               mountPath: /workspace
             - name: gitconfig
@@ -141,7 +229,7 @@ spec:
             name: {{ include "cc-rc.fullname" $root }}-gitconfig
   volumeClaimTemplates:
     - metadata:
-        name: claude-home
+        name: home
       spec:
         accessModes: ["ReadWriteOnce"]
         {{- if $root.Values.storage.storageClassName }}
@@ -149,7 +237,7 @@ spec:
         {{- end }}
         resources:
           requests:
-            storage: {{ $claudeSize }}
+            storage: {{ $homeSize }}
     - metadata:
         name: workspace
       spec:

@@ -109,3 +109,31 @@ the .gitconfig ConfigMap to exist (fails the whole render if unset).
 {{ fail "git.email must be set (the commit identity used inside each agent)." }}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Validate remoteControl.permissionMode/spawn, both the top-level defaults and
+any per-repo overrides, against claude remote-control's accepted values.
+*/}}
+{{- define "cc-rc.validateRemoteControl" -}}
+{{- $permissionModes := list "acceptEdits" "auto" "bypassPermissions" "default" "dontAsk" "plan" -}}
+{{- $spawnModes := list "same-dir" "worktree" "session" -}}
+{{- if not (has .Values.remoteControl.permissionMode $permissionModes) -}}
+{{ fail (printf "remoteControl.permissionMode must be one of %s; got %q" (join ", " $permissionModes) .Values.remoteControl.permissionMode) }}
+{{- end -}}
+{{- if not (has .Values.remoteControl.spawn $spawnModes) -}}
+{{ fail (printf "remoteControl.spawn must be one of %s; got %q" (join ", " $spawnModes) .Values.remoteControl.spawn) }}
+{{- end -}}
+{{- range .Values.repos -}}
+{{- $rc := .remoteControl | default dict -}}
+{{- if $rc.permissionMode -}}
+{{- if not (has $rc.permissionMode $permissionModes) -}}
+{{ fail (printf "repos[].remoteControl.permissionMode must be one of %s; got %q" (join ", " $permissionModes) $rc.permissionMode) }}
+{{- end -}}
+{{- end -}}
+{{- if $rc.spawn -}}
+{{- if not (has $rc.spawn $spawnModes) -}}
+{{ fail (printf "repos[].remoteControl.spawn must be one of %s; got %q" (join ", " $spawnModes) $rc.spawn) }}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
