@@ -1,7 +1,7 @@
 # -- Image for the per-repo agent StatefulSets
 image:
   repository: ghcr.io/vince-riv/cc-rc
-  tag: latest
+  tag: latest@sha256:b00570be2f4ae4bc83a1e5c6382b9d96225833e7f7ec79b1cd0fa45056a61b81
   pullPolicy: Always
 
 # -- GitHub auth for cloning repos and for the `gh`/`git` CLIs inside each agent.
@@ -94,7 +94,7 @@ podFsGroup: 1000
 proxy:
   image:
     repository: ubuntu/squid
-    tag: 7.2-26.04_edge
+    tag: 7.2-26.04_edge@sha256:382ea00b5219492965a9ddd47da758317b77cd2f37d31b57fbf396ac6445daea
     pullPolicy: IfNotPresent
   replicaCount: 1
   service:

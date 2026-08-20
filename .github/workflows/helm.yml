@@ -23,10 +23,10 @@ jobs:
 
     steps:
       - name: Check out repo
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Helm
-        uses: azure/setup-helm@v5
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
 
       - name: Install helm-unittest plugin
         # --verify=false works around helm-unittest not yet supporting Helm
@@ -61,7 +61,7 @@ jobs:
       # pushed directly even from a workflow. Open/update a PR instead.
       - name: Open PR with regenerated docs
         if: github.event_name == 'push'
-        uses: peter-evans/create-pull-request@v8
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8
         with:
           commit-message: "docs: regenerate Helm chart README via helm-docs"
           title: "docs: regenerate Helm chart README via helm-docs"
