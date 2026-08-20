@@ -53,6 +53,8 @@ spec:
       cc-rc.io/repo: {{ $repoEntry.repo | quote }}
   template:
     metadata:
+      annotations:
+        checksum/scripts: {{ include (print $.Template.BasePath "/configmap-scripts.yaml") $root | sha256sum }}
       labels:
         {{- include "cc-rc.labels" $root | nindent 8 }}
         app.kubernetes.io/component: agent
@@ -70,43 +72,21 @@ spec:
           # where the PVC is mounted directly at /home/dev and shadows it.
           image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
           imagePullPolicy: {{ $root.Values.image.pullPolicy }}
-          command: ["/bin/bash", "-c"]
-          args:
-            - |
-              set -euo pipefail
-              # ~/.claude/: overwrite from image, never delete extras
-              # (claude's own state/credentials survive; --ignore-times
-              # forces the overwrite even on a size+mtime match).
-              # Everywhere else: full reset via --delete, except ~/.cc-rc/
-              # (our login-complete marker - must survive every boot).
-              # --no-owner --no-group --no-perms: the PVC mountpoint root
-              # is owned by root (fsGroup only adds group-write, it
-              # doesn't chown), so non-root can never chown/chgrp/chmod
-              # it - EPERM, even though writing new files inside it works
-              # fine. New files still land with sane permissions anyway.
-              mkdir -p /home/dev/.claude /mnt/home-pvc/.claude
-              rsync -a --no-times --no-owner --no-group --no-perms --ignore-times \
-                /home/dev/.claude/. /mnt/home-pvc/.claude/
-              rsync -a --delete --no-times --no-owner --no-group --no-perms \
-                --exclude=.claude --exclude=.cc-rc \
-                /home/dev/. /mnt/home-pvc/
+          command: ["/bin/bash", "/opt/cc-rc/scripts/seed-home.sh"]
           volumeMounts:
             - name: home
               mountPath: /mnt/home-pvc
+            - name: scripts
+              mountPath: /opt/cc-rc/scripts
         - name: clone-repo
           image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
           imagePullPolicy: {{ $root.Values.image.pullPolicy }}
-          command: ["/bin/bash", "-c"]
-          args:
-            - |
-              set -euo pipefail
-              DEST="/workspace/repo"
-              if [ -d "$DEST/.git" ]; then
-                echo "Already cloned at $DEST, skipping."
-              else
-                git clone "https://x-access-token:${GH_TOKEN}@github.com/{{ $repoEntry.org }}/{{ $repoEntry.repo }}.git" "$DEST"
-              fi
+          command: ["/bin/bash", "/opt/cc-rc/scripts/clone-repo.sh"]
           env:
+            - name: REPO_ORG
+              value: {{ $repoEntry.org | quote }}
+            - name: REPO_NAME
+              value: {{ $repoEntry.repo | quote }}
             - name: GH_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -133,64 +113,13 @@ spec:
             - name: gitconfig
               mountPath: /home/dev/.gitignore_global
               subPath: .gitignore_global
+            - name: scripts
+              mountPath: /opt/cc-rc/scripts
       containers:
         - name: agent
           image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
           imagePullPolicy: {{ $root.Values.image.pullPolicy }}
-          command: ["/bin/bash", "-c"]
-          args:
-            - |
-              set -uo pipefail
-              MARKER_DIR="/home/dev/.cc-rc"
-              MARKER="$MARKER_DIR/login-complete"
-              mkdir -p "$MARKER_DIR"
-
-              # pgrep -f matches full command lines, including this very
-              # script's own (it echoes "claude remote-control" in its
-              # instructions below) - exclude our own PID or this always
-              # "detects" a false positive against ourselves.
-              is_remote_control_running() {
-                pgrep -f "claude remote-control" | grep -qv "^$$\$"
-              }
-
-              if [ ! -f "$MARKER" ]; then
-                echo "No login marker at $MARKER - starting first-time claude login setup."
-                echo "Attach with: kubectl exec -it \$(hostname) -- screen -r claude-login"
-                echo "Then run /login, and once logged in, run: claude remote-control"
-                screen -dmS claude-login bash -lic 'claude --no-chrome'
-
-                echo "Waiting for 'claude remote-control' to be started inside that session..."
-                while ! is_remote_control_running; do
-                  sleep 5
-                done
-
-                echo "Detected claude remote-control running - marking login complete."
-                touch "$MARKER"
-                echo "Exiting so the pod restarts into steady-state mode."
-                exit 0
-              fi
-
-              NAME="${RC_NAME:-$(hostname)}"
-              echo "Login already complete - starting claude remote-control (name=$NAME)."
-              screen -dmS remote-control bash -lic "claude remote-control --name ${NAME} --permission-mode ${RC_PERMISSION_MODE} --spawn ${RC_SPAWN} --capacity ${RC_CAPACITY}"
-
-              down_since=0
-              while true; do
-                if is_remote_control_running; then
-                  down_since=0
-                else
-                  now=$(date +%s)
-                  if [ "$down_since" -eq 0 ]; then
-                    down_since=$now
-                  fi
-                  elapsed=$(( now - down_since ))
-                  if [ "$elapsed" -ge 45 ]; then
-                    echo "claude remote-control has not been running for 45s - exiting."
-                    exit 1
-                  fi
-                fi
-                sleep 5
-              done
+          command: ["/bin/bash", "/opt/cc-rc/scripts/agent-entrypoint.sh"]
           env:
             - name: GH_TOKEN
               valueFrom:
@@ -233,6 +162,8 @@ spec:
             - name: gitconfig
               mountPath: /home/dev/.gitignore_global
               subPath: .gitignore_global
+            - name: scripts
+              mountPath: /opt/cc-rc/scripts
           {{- with $resources }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -241,6 +172,9 @@ spec:
         - name: gitconfig
           configMap:
             name: {{ include "cc-rc.fullname" $root }}-gitconfig
+        - name: scripts
+          configMap:
+            name: {{ include "cc-rc.fullname" $root }}-scripts
   volumeClaimTemplates:
     - apiVersion: v1
       kind: PersistentVolumeClaim

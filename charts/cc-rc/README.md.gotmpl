@@ -38,6 +38,12 @@ repo, each behind a locked-down [Squid](https://www.squid-cache.org/) egress pro
   the Squid `Service` and to cluster DNS.
 - A `ConfigMap` rendering `~/.gitconfig` and `~/.gitignore_global` for the `dev` user,
   mounted read-only into every agent.
+- A `ConfigMap` holding the `seed-home`/`clone-repo`/agent-entrypoint scripts
+  (`charts/cc-rc/files/scripts/`), mounted read-only at `/opt/cc-rc/scripts` rather
+  than baked into the image — so a custom `image.repository`/`image.tag` only needs to
+  provide the underlying tools (`claude`, `screen`, `git`, `rsync`), not this
+  orchestration logic. A `checksum/scripts` pod annotation rolls the `StatefulSet`s on
+  any script change.
 
 ## Installing
 

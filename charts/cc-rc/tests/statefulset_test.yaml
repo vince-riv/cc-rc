@@ -1,6 +1,7 @@
 suite: per-repo agent StatefulSet (happy path)
 templates:
   - statefulset-repo.yaml
+  - configmap-scripts.yaml
 set:
   github.token: dummy-token
   git:
@@ -8,6 +9,7 @@ set:
     email: ci@example.com
 tests:
   - it: renders a headless Service and a StatefulSet named after the org/repo slug
+    template: statefulset-repo.yaml
     set:
       repos:
         - org: MyOrg
@@ -49,6 +51,7 @@ tests:
           value: My_Repo!
 
   - it: uses default PVC sizes when a repo doesn't override storage
+    template: statefulset-repo.yaml
     set:
       repos:
         - org: myorg
@@ -72,6 +75,7 @@ tests:
           value: 5Gi
 
   - it: a repo can override PVC sizes
+    template: statefulset-repo.yaml
     set:
       repos:
         - org: myorg
@@ -90,6 +94,7 @@ tests:
           value: 20Gi
 
   - it: applies the default resources to the agent container when no repo override is set
+    template: statefulset-repo.yaml
     set:
       resources:
         requests:
@@ -116,6 +121,7 @@ tests:
           value: "1"
 
   - it: a repo can override just cpu, keeping the default memory
+    template: statefulset-repo.yaml
     set:
       resources:
         requests:
@@ -138,6 +144,7 @@ tests:
           value: 512Mi
 
   - it: a repo can fully override resources independently of the chart default
+    template: statefulset-repo.yaml
     set:
       resources:
         requests:
@@ -167,6 +174,7 @@ tests:
           value: 8Gi
 
   - it: wires proxy env vars and GH_TOKEN into both the clone-repo init container and the agent container
+    template: statefulset-repo.yaml
     set:
       repos:
         - org: myorg
@@ -194,6 +202,7 @@ tests:
           value: token
 
   - it: mounts the home and workspace PVCs at the expected paths
+    template: statefulset-repo.yaml
     set:
       repos:
         - org: myorg
@@ -212,7 +221,8 @@ tests:
             name: workspace
             mountPath: /workspace
 
-  - it: seeds the home PVC from the image's home dir without touching /home/dev directly
+  - it: seeds the home PVC via the mounted seed-home script, before cloning the repo
+    template: statefulset-repo.yaml
     set:
       repos:
         - org: myorg
@@ -223,21 +233,9 @@ tests:
           path: spec.template.spec.initContainers[0].name
           value: seed-home
       - documentIndex: 1
-        matchRegex:
-          path: spec.template.spec.initContainers[0].args[0]
-          pattern: "rsync -a --no-times --no-owner --no-group --no-perms --ignore-times"
-      - documentIndex: 1
-        matchRegex:
-          path: spec.template.spec.initContainers[0].args[0]
-          pattern: "/home/dev/\\.claude/\\. /mnt/home-pvc/\\.claude/"
-      - documentIndex: 1
-        matchRegex:
-          path: spec.template.spec.initContainers[0].args[0]
-          pattern: "rsync -a --delete --no-times --no-owner --no-group --no-perms"
-      - documentIndex: 1
-        matchRegex:
-          path: spec.template.spec.initContainers[0].args[0]
-          pattern: "--exclude=\\.claude --exclude=\\.cc-rc"
+        equal:
+          path: spec.template.spec.initContainers[0].command
+          value: ["/bin/bash", "/opt/cc-rc/scripts/seed-home.sh"]
       - documentIndex: 1
         contains:
           path: spec.template.spec.initContainers[0].volumeMounts
@@ -245,11 +243,34 @@ tests:
             name: home
             mountPath: /mnt/home-pvc
       - documentIndex: 1
+        contains:
+          path: spec.template.spec.initContainers[0].volumeMounts
+          content:
+            name: scripts
+            mountPath: /opt/cc-rc/scripts
+      - documentIndex: 1
         equal:
           path: spec.template.spec.initContainers[1].name
           value: clone-repo
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.initContainers[1].command
+          value: ["/bin/bash", "/opt/cc-rc/scripts/clone-repo.sh"]
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.initContainers[1].env
+          content:
+            name: REPO_ORG
+            value: myorg
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.initContainers[1].env
+          content:
+            name: REPO_NAME
+            value: myrepo
 
   - it: mounts the gitconfig ConfigMap into the clone-repo init container and the agent container
+    template: statefulset-repo.yaml
     set:
       repos:
         - org: myorg
@@ -285,6 +306,7 @@ tests:
               name: RELEASE-NAME-cc-rc-gitconfig
 
   - it: renders one StatefulSet per repo entry
+    template: statefulset-repo.yaml
     set:
       repos:
         - org: alpha
@@ -302,6 +324,7 @@ tests:
           value: RELEASE-NAME-cc-rc-beta-two
 
   - it: uses an existing GH_TOKEN secret when github.existingSecret is set
+    template: statefulset-repo.yaml
     set:
       github:
         token: ""
@@ -321,6 +344,7 @@ tests:
           value: gh-pat
 
   - it: has a readiness probe that checks for a running claude remote-control process
+    template: statefulset-repo.yaml
     set:
       repos:
         - org: myorg
@@ -331,41 +355,33 @@ tests:
           path: spec.template.spec.containers[0].readinessProbe.exec.command
           value: ["pgrep", "-f", "claude remote-control"]
 
-  - it: the agent bootstrap script checks a login-complete marker, waits for remote-control, then exits
+  - it: the agent container runs the mounted entrypoint script, with the scripts volume mounted
+    template: statefulset-repo.yaml
     set:
       repos:
         - org: myorg
           repo: myrepo
     asserts:
       - documentIndex: 1
-        matchRegex:
-          path: spec.template.spec.containers[0].args[0]
-          pattern: "MARKER=\"\\$MARKER_DIR/login-complete\""
+        equal:
+          path: spec.template.spec.containers[0].command
+          value: ["/bin/bash", "/opt/cc-rc/scripts/agent-entrypoint.sh"]
       - documentIndex: 1
-        matchRegex:
-          path: spec.template.spec.containers[0].args[0]
-          # pgrep -f matches this script's own process too (it echoes
-          # "claude remote-control" in its own instructions) - must exclude
-          # $$ or the very first boot always false-positives immediately.
-          pattern: "pgrep -f \"claude remote-control\" \\| grep -qv \"\\^\\$\\$\\\\\\$\""
+        contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: scripts
+            mountPath: /opt/cc-rc/scripts
       - documentIndex: 1
-        matchRegex:
-          path: spec.template.spec.containers[0].args[0]
-          pattern: "screen -dmS claude-login bash -lic 'claude --no-chrome'"
-      - documentIndex: 1
-        matchRegex:
-          path: spec.template.spec.containers[0].args[0]
-          pattern: "touch \"\\$MARKER\""
-      - documentIndex: 1
-        matchRegex:
-          path: spec.template.spec.containers[0].args[0]
-          pattern: "screen -dmS remote-control bash -lic \"claude remote-control --name \\$\\{NAME\\} --permission-mode \\$\\{RC_PERMISSION_MODE\\} --spawn \\$\\{RC_SPAWN\\} --capacity \\$\\{RC_CAPACITY\\}\""
-      - documentIndex: 1
-        matchRegex:
-          path: spec.template.spec.containers[0].args[0]
-          pattern: '-ge 45 \]; then'
+        contains:
+          path: spec.template.spec.volumes
+          content:
+            name: scripts
+            configMap:
+              name: RELEASE-NAME-cc-rc-scripts
 
   - it: passes the default remote-control settings as env vars, with no name override
+    template: statefulset-repo.yaml
     set:
       repos:
         - org: myorg
@@ -397,6 +413,7 @@ tests:
             value: "8"
 
   - it: a repo can override remote-control name/permissionMode/spawn/capacity independently of the chart default
+    template: statefulset-repo.yaml
     set:
       remoteControl:
         permissionMode: plan
@@ -435,6 +452,7 @@ tests:
             value: "12"
 
   - it: fails when remoteControl.permissionMode is not a recognized value
+    template: statefulset-repo.yaml
     set:
       remoteControl:
         permissionMode: not-a-real-mode
@@ -446,6 +464,7 @@ tests:
           errorMessageRegex: "remoteControl.permissionMode must be one of"
 
   - it: fails when remoteControl.spawn is not a recognized value
+    template: statefulset-repo.yaml
     set:
       remoteControl:
         spawn: not-a-real-mode
@@ -457,6 +476,7 @@ tests:
           errorMessageRegex: "remoteControl.spawn must be one of"
 
   - it: fails when a repo's remoteControl.permissionMode override is not a recognized value
+    template: statefulset-repo.yaml
     set:
       repos:
         - org: myorg

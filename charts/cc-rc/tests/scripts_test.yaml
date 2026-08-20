@@ -1,0 +1,64 @@
+suite: mounted scripts ConfigMap (happy path)
+templates:
+  - configmap-scripts.yaml
+set:
+  github.token: dummy-token
+  git:
+    name: CI Bot
+    email: ci@example.com
+  repos:
+    - org: myorg
+      repo: myrepo
+tests:
+  - it: seed-home.sh overwrites ~/.claude/ from the image but resets everywhere else, excluding ~/.cc-rc/
+    asserts:
+      - isKind:
+          of: ConfigMap
+      - matchRegex:
+          path: data["seed-home.sh"]
+          pattern: "rsync -a --no-times --no-owner --no-group --no-perms --ignore-times"
+      - matchRegex:
+          path: data["seed-home.sh"]
+          pattern: "/home/dev/\\.claude/\\. /mnt/home-pvc/\\.claude/"
+      - matchRegex:
+          path: data["seed-home.sh"]
+          pattern: "rsync -a --delete --no-times --no-owner --no-group --no-perms"
+      - matchRegex:
+          path: data["seed-home.sh"]
+          pattern: "--exclude=\\.claude --exclude=\\.cc-rc"
+
+  - it: clone-repo.sh clones via REPO_ORG/REPO_NAME env vars, idempotently
+    asserts:
+      - matchRegex:
+          path: data["clone-repo.sh"]
+          pattern: 'DEST="/workspace/repo"'
+      - matchRegex:
+          path: data["clone-repo.sh"]
+          pattern: 'if \[ -d "\$DEST/\.git" \]'
+      - matchRegex:
+          path: data["clone-repo.sh"]
+          pattern: "https://x-access-token:\\$\\{GH_TOKEN\\}@github\\.com/\\$\\{REPO_ORG\\}/\\$\\{REPO_NAME\\}\\.git"
+
+  - it: agent-entrypoint.sh checks a login-complete marker, waits for remote-control, then exits
+    asserts:
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          pattern: "MARKER=\"\\$MARKER_DIR/login-complete\""
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          # pgrep -f matches this script's own process too (it echoes
+          # "claude remote-control" in its own instructions) - must exclude
+          # $$ or the very first boot always false-positives immediately.
+          pattern: "pgrep -f \"claude remote-control\" \\| grep -qv \"\\^\\$\\$\\\\\\$\""
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          pattern: "screen -dmS claude-login bash -lic 'claude --no-chrome'"
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          pattern: "touch \"\\$MARKER\""
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          pattern: "screen -dmS remote-control bash -lic \"claude remote-control --name \\$\\{NAME\\} --permission-mode \\$\\{RC_PERMISSION_MODE\\} --spawn \\$\\{RC_SPAWN\\} --capacity \\$\\{RC_CAPACITY\\}\""
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          pattern: '-ge 45 \]; then'

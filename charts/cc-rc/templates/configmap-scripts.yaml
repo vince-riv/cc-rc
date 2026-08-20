@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cc-rc.fullname" . }}-scripts
+  labels:
+    {{- include "cc-rc.labels" . | nindent 4 }}
+data:
+  seed-home.sh: |
+    {{- .Files.Get "files/scripts/seed-home.sh" | nindent 4 }}
+  clone-repo.sh: |
+    {{- .Files.Get "files/scripts/clone-repo.sh" | nindent 4 }}
+  agent-entrypoint.sh: |
+    {{- .Files.Get "files/scripts/agent-entrypoint.sh" | nindent 4 }}
