@@ -3,7 +3,9 @@
 {{- include "cc-rc.validateRemoteControl" . -}}
 {{- $root := . -}}
 {{- $proxyURL := printf "http://%s.%s.svc.cluster.local:%v" (include "cc-rc.squidServiceName" .) .Release.Namespace .Values.proxy.service.port -}}
-{{- $noProxy := "localhost,127.0.0.1,.svc,.svc.cluster.local,.cluster.local" -}}
+{{- /* .anthropic.com bypasses the proxy - see NetworkPolicy egress rule
+   for 160.79.104.0/23 / 2607:6bc0::/48 that allows this direct route. */ -}}
+{{- $noProxy := "localhost,127.0.0.1,.svc,.svc.cluster.local,.cluster.local,.anthropic.com" -}}
 {{- range $repoEntry := .Values.repos }}
 {{- $slug := include "cc-rc.repoSlug" $repoEntry }}
 {{- $name := printf "%s-%s" (include "cc-rc.fullname" $root) $slug }}
