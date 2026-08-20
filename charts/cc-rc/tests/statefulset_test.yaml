@@ -355,7 +355,7 @@ tests:
           path: spec.template.spec.containers[0].env[0].valueFrom.secretKeyRef.key
           value: gh-pat
 
-  - it: has a readiness probe that checks for a running claude remote-control process
+  - it: has a readiness probe that checks for a running claude remote-control process, and no livenessProbe
     template: statefulset-repo.yaml
     set:
       repos:
@@ -366,6 +366,12 @@ tests:
         equal:
           path: spec.template.spec.containers[0].readinessProbe.exec.command
           value: ["pgrep", "-f", "claude remote-control"]
+      - documentIndex: 1
+        # Deliberately no livenessProbe: it would kill the container on
+        # kubelet's own schedule, bypassing RC_UNHEALTHY_TIMEOUT - the
+        # script manages its own exit-on-unhealthy instead.
+        notExists:
+          path: spec.template.spec.containers[0].livenessProbe
 
   - it: the agent container runs the mounted entrypoint script, with the scripts volume mounted
     template: statefulset-repo.yaml
@@ -423,8 +429,14 @@ tests:
           content:
             name: RC_CAPACITY
             value: "8"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RC_UNHEALTHY_TIMEOUT
+            value: "45"
 
-  - it: a repo can override remote-control name/permissionMode/spawn/capacity independently of the chart default
+  - it: a repo can override remote-control name/permissionMode/spawn/capacity/unhealthyTimeoutSeconds independently of the chart default
     template: statefulset-repo.yaml
     set:
       remoteControl:
@@ -437,6 +449,7 @@ tests:
           remoteControl:
             name: custom-name
             capacity: 12
+            unhealthyTimeoutSeconds: 300
     asserts:
       - documentIndex: 1
         contains:
@@ -462,6 +475,12 @@ tests:
           content:
             name: RC_CAPACITY
             value: "12"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RC_UNHEALTHY_TIMEOUT
+            value: "300"
 
   - it: fails when remoteControl.permissionMode is not a recognized value
     template: statefulset-repo.yaml

@@ -56,13 +56,25 @@ tests:
           pattern: "pgrep -f \"claude remote-control\" \\| grep -qv \"\\^\\$\\$\\\\\\$\""
       - matchRegex:
           path: data["agent-entrypoint.sh"]
-          pattern: "screen -dmS claude-login bash -lic 'claude --no-chrome'"
+          # -L -Logfile captures the screen session's output (otherwise
+          # invisible via kubectl logs/stern), tailed into our own stdout.
+          pattern: "screen -L -Logfile \"\\$LOGIN_LOG\" -dmS claude-login bash -lic 'claude --no-chrome'"
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          pattern: 'tail -F "\$LOGIN_LOG" &'
       - matchRegex:
           path: data["agent-entrypoint.sh"]
           pattern: "touch \"\\$MARKER\""
       - matchRegex:
           path: data["agent-entrypoint.sh"]
-          pattern: "screen -dmS remote-control bash -lic \"claude remote-control --name \\$\\{NAME\\} --permission-mode \\$\\{RC_PERMISSION_MODE\\} --spawn \\$\\{RC_SPAWN\\} --capacity \\$\\{RC_CAPACITY\\}\""
+          pattern: "screen -L -Logfile \"\\$RC_LOG\" -dmS remote-control bash -lic \"claude remote-control --name \\$\\{NAME\\} --permission-mode \\$\\{RC_PERMISSION_MODE\\} --spawn \\$\\{RC_SPAWN\\} --capacity \\$\\{RC_CAPACITY\\}\""
       - matchRegex:
           path: data["agent-entrypoint.sh"]
-          pattern: '-ge 45 \]; then'
+          pattern: 'tail -F "\$RC_LOG" &'
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          # timeout is configurable (RC_UNHEALTHY_TIMEOUT env var), not
+          # hardcoded, so it can be raised to give more time to
+          # `kubectl exec` in and debug a startup failure before the
+          # container exits/restarts.
+          pattern: '-ge "\$RC_UNHEALTHY_TIMEOUT" \]; then'

@@ -119,15 +119,17 @@ git:
 
 ## Claude login and remote-control
 
-On its first boot, each agent starts `claude` in a detached `screen` session (checked
-via a `~/.cc-rc/login-complete` marker file on the home PVC, so this only happens once
-per repo, ever — it persists across restarts):
+On its first boot, each agent starts `claude` in a detached, logged `screen` session
+(checked via a `~/.cc-rc/login-complete` marker file on the home PVC, so this only
+happens once per repo, ever — it persists across restarts):
 
 ```sh
-screen -dmS claude-login bash -lic 'claude --no-chrome'
+screen -L -Logfile /tmp/cc-rc-claude-login.log -dmS claude-login bash -lic 'claude --no-chrome'
 ```
 
-Attach to it and complete login by hand:
+`-L -Logfile` matters: `screen` sessions are otherwise invisible to `kubectl logs`/
+stern entirely. The agent `tail -F`s that log into its own stdout, so session output —
+including any errors — shows up there too; attach interactively if needed:
 
 ```sh
 kubectl exec -it <pod> -- screen -r claude-login
@@ -140,24 +142,30 @@ the marker file and exits — the pod restarts (StatefulSet pods always use
 runs:
 
 ```sh
-screen -dmS remote-control bash -lic 'claude remote-control --name <name> --permission-mode <mode> --spawn <mode> --capacity <n>'
+screen -L -Logfile /tmp/cc-rc-remote-control.log -dmS remote-control bash -lic 'claude remote-control --name <name> --permission-mode <mode> --spawn <mode> --capacity <n>'
 ```
 
 `--name` defaults to the pod's hostname (e.g. `cc-rc-myorg-myrepo-0`) unless
-`repos[].remoteControl.name` is set. `--permission-mode`, `--spawn`, and `--capacity`
-come from `remoteControl.*` (global defaults) or `repos[].remoteControl.*`
-(per-repo override):
+`repos[].remoteControl.name` is set. `--permission-mode`, `--spawn`, `--capacity`, and
+`unhealthyTimeoutSeconds` come from `remoteControl.*` (global defaults) or
+`repos[].remoteControl.*` (per-repo override):
 
 ```yaml
 remoteControl:
   permissionMode: bypassPermissions   # acceptEdits | auto | bypassPermissions | default | dontAsk | plan
   spawn: worktree                     # same-dir | worktree | session
   capacity: 8
+  unhealthyTimeoutSeconds: 45
 ```
 
 The container's readiness probe checks for a running `claude remote-control` process
-directly (no grace period), and the container itself exits — triggering a restart —
-if that process has been down for 45 continuous seconds.
+directly (no grace period). There's deliberately no `livenessProbe`: the agent
+container manages its own exit-on-unhealthy instead, so `unhealthyTimeoutSeconds` is
+actually honored rather than being pre-empted by kubelet on its own schedule — the
+container exits (triggering a restart) once the process has been down that long.
+Raise it (e.g. `--set remoteControl.unhealthyTimeoutSeconds=600`) to get more time to
+`kubectl exec -it <pod> -- bash` in and debug a startup failure — the tailed log and
+`screen -r remote-control` both stay attachable throughout that window.
 
 ## Configuring egress
 

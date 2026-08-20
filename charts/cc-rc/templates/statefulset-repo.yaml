@@ -16,6 +16,7 @@
 {{- $rcPermissionMode := $rc.permissionMode | default $root.Values.remoteControl.permissionMode }}
 {{- $rcSpawn := $rc.spawn | default $root.Values.remoteControl.spawn }}
 {{- $rcCapacity := $rc.capacity | default $root.Values.remoteControl.capacity }}
+{{- $rcUnhealthyTimeout := $rc.unhealthyTimeoutSeconds | default $root.Values.remoteControl.unhealthyTimeoutSeconds }}
 {{- $rcName := $rc.name | default "" }}
 ---
 apiVersion: v1
@@ -148,6 +149,12 @@ spec:
               value: {{ $rcSpawn | quote }}
             - name: RC_CAPACITY
               value: {{ $rcCapacity | quote }}
+            - name: RC_UNHEALTHY_TIMEOUT
+              value: {{ $rcUnhealthyTimeout | quote }}
+          # No livenessProbe: it would kill the container on kubelet's own
+          # schedule, bypassing RC_UNHEALTHY_TIMEOUT - the script manages its
+          # own exit-on-unhealthy so that timeout (and the debugging window
+          # it gives you) is actually honored.
           readinessProbe:
             exec:
               command: ["pgrep", "-f", "claude remote-control"]

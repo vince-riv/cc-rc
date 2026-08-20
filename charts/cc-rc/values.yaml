@@ -71,6 +71,7 @@ repos: []
   #     permissionMode: bypassPermissions
   #     spawn: worktree
   #     capacity: 8
+  #     unhealthyTimeoutSeconds: 45
 
 # -- Default persistent volume sizes for each per-repo agent.
 storage:
@@ -93,6 +94,12 @@ remoteControl:
   spawn: worktree
   # -- --capacity
   capacity: 8
+  # -- Seconds `claude remote-control` may be down (never started, or crashed)
+  # before the agent container exits, restarting the pod. Kept fairly short by
+  # default so a genuine crash self-heals promptly; raise it (e.g. via --set)
+  # while debugging a startup failure, since it's also the window you have to
+  # `kubectl exec` in and inspect before the container cycles.
+  unhealthyTimeoutSeconds: 45
 
 # -- Default container resources for the per-repo agent container. Empty means no
 # requests/limits are set.
