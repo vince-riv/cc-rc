@@ -93,6 +93,16 @@ tests:
           path: data["squid.conf"]
           pattern: "cache_log /dev/stdout"
 
+  - it: drops tcpSocket-probe noise (status 000) from the access log
+    template: configmap-squid.yaml
+    asserts:
+      - matchRegex:
+          path: data["squid.conf"]
+          pattern: "acl tcp_probe http_status 0"
+      - matchRegex:
+          path: data["squid.conf"]
+          pattern: "access_log none tcp_probe"
+
   - it: strict allow-list mode restricts to allowed destinations with no ssh carve-out
     template: configmap-squid.yaml
     set:

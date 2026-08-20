@@ -30,6 +30,11 @@ data:
     coredump_dir /var/spool/squid
     # Default access_log/cache_log write to files inside the container,
     # invisible to `kubectl logs`/stern - redirect both to stdout instead.
+    # kubelet's tcpSocket probes connect then disconnect without sending a
+    # request, logging as NONE_NONE/000 - drop those before the catch-all
+    # access_log line so they don't spam kubectl logs/stern.
+    acl tcp_probe http_status 0
+    access_log none tcp_probe
     access_log stdio:/dev/stdout squid
     cache_log /dev/stdout
     refresh_pattern ^ftp:           1440    20%     10080
