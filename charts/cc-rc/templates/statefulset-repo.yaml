@@ -79,7 +79,11 @@ spec:
               # anything already on the PVC that the image doesn't have -
               # cp -a without --delete is exactly that: recursive, permissions
               # preserved, existing-but-not-in-source files left alone.
-              cp -a /home/dev/. /mnt/home-pvc/
+              # --no-preserve=timestamps: some CSI drivers reject utime() on
+              # the PVC mountpoint itself ("Operation not permitted"), which
+              # cp -a otherwise treats as a fatal error even though the copy
+              # itself succeeded.
+              cp -a --no-preserve=timestamps /home/dev/. /mnt/home-pvc/
           volumeMounts:
             - name: home
               mountPath: /mnt/home-pvc

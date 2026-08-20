@@ -225,7 +225,7 @@ tests:
       - documentIndex: 1
         matchRegex:
           path: spec.template.spec.initContainers[0].args[0]
-          pattern: "cp -a /home/dev/\\. /mnt/home-pvc/"
+          pattern: "cp -a --no-preserve=timestamps /home/dev/\\. /mnt/home-pvc/"
       - documentIndex: 1
         contains:
           path: spec.template.spec.initContainers[0].volumeMounts
