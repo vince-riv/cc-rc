@@ -145,8 +145,12 @@ spec:
               MARKER="$MARKER_DIR/login-complete"
               mkdir -p "$MARKER_DIR"
 
+              # pgrep -f matches full command lines, including this very
+              # script's own (it echoes "claude remote-control" in its
+              # instructions below) - exclude our own PID or this always
+              # "detects" a false positive against ourselves.
               is_remote_control_running() {
-                pgrep -f "claude remote-control" >/dev/null 2>&1
+                pgrep -f "claude remote-control" | grep -qv "^$$\$"
               }
 
               if [ ! -f "$MARKER" ]; then

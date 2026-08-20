@@ -344,6 +344,13 @@ tests:
       - documentIndex: 1
         matchRegex:
           path: spec.template.spec.containers[0].args[0]
+          # pgrep -f matches this script's own process too (it echoes
+          # "claude remote-control" in its own instructions) - must exclude
+          # $$ or the very first boot always false-positives immediately.
+          pattern: "pgrep -f \"claude remote-control\" \\| grep -qv \"\\^\\$\\$\\\\\\$\""
+      - documentIndex: 1
+        matchRegex:
+          path: spec.template.spec.containers[0].args[0]
           pattern: "screen -dmS claude-login bash -lic 'claude --no-chrome'"
       - documentIndex: 1
         matchRegex:
