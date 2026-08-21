@@ -124,7 +124,7 @@ On its first boot, each agent starts `claude` in a detached, logged `screen` ses
 happens once per repo, ever — it persists across restarts):
 
 ```sh
-screen -L -Logfile /tmp/cc-rc-claude-login.log -dmS claude-login bash -lic 'claude --no-chrome'
+screen -L -Logfile /tmp/cc-rc-claude-login.log -dmS claude-login bash -lic 'cd /workspace/repo && claude --no-chrome'
 ```
 
 `-L -Logfile` matters: `screen` sessions are otherwise invisible to `kubectl logs`/
@@ -142,7 +142,7 @@ the marker file and exits — the pod restarts (StatefulSet pods always use
 runs:
 
 ```sh
-screen -L -Logfile /tmp/cc-rc-remote-control.log -dmS remote-control bash -lic 'claude remote-control --name <name> --permission-mode <mode> --spawn <mode> --capacity <n>'
+screen -L -Logfile /tmp/cc-rc-remote-control.log -dmS remote-control bash -lic 'cd /workspace/repo && claude remote-control --name <name> --permission-mode <mode> --spawn <mode> --capacity <n>'
 ```
 
 `--name` defaults to the pod's hostname (e.g. `cc-rc-myorg-myrepo-0`) unless

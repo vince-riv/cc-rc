@@ -48,6 +48,7 @@ git:
     - "*.pyc"
     - "__pycache__"
     - "**/.claude/settings.local.json"
+    - "**/.claude/worktrees/"
 
 # -- One StatefulSet is created per entry. `org`/`repo` are the GitHub org and repo name.
 # Optional per-entry `resources`, `storage`, and `remoteControl` override the defaults

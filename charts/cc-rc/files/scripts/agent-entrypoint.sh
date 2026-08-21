@@ -20,7 +20,7 @@ if [ ! -f "$MARKER" ]; then
   echo "Then run /login, and once logged in, run: claude remote-control"
   echo "Session output is also tailed below (and kept at $LOGIN_LOG)."
   : > "$LOGIN_LOG"
-  screen -L -Logfile "$LOGIN_LOG" -dmS claude-login bash -lic 'claude --no-chrome'
+  screen -L -Logfile "$LOGIN_LOG" -dmS claude-login bash -lic 'cd /workspace/repo && claude --no-chrome'
   tail -F "$LOGIN_LOG" &
   login_tail_pid=$!
 
@@ -41,7 +41,7 @@ echo "Login already complete - starting claude remote-control (name=$NAME)."
 echo "Session output tailed below (and kept at $RC_LOG). To debug interactively:"
 echo "  kubectl exec -it \$(hostname) -- screen -r remote-control"
 : > "$RC_LOG"
-screen -L -Logfile "$RC_LOG" -dmS remote-control bash -lic "claude remote-control --name ${NAME} --permission-mode ${RC_PERMISSION_MODE} --spawn ${RC_SPAWN} --capacity ${RC_CAPACITY}"
+screen -L -Logfile "$RC_LOG" -dmS remote-control bash -lic "cd /workspace/repo && claude remote-control --name ${NAME} --permission-mode ${RC_PERMISSION_MODE} --spawn ${RC_SPAWN} --capacity ${RC_CAPACITY}"
 tail -F "$RC_LOG" &
 
 down_since=0

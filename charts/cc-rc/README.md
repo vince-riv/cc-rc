@@ -121,7 +121,7 @@ On its first boot, each agent starts `claude` in a detached, logged `screen` ses
 happens once per repo, ever — it persists across restarts):
 
 ```sh
-screen -L -Logfile /tmp/cc-rc-claude-login.log -dmS claude-login bash -lic 'claude --no-chrome'
+screen -L -Logfile /tmp/cc-rc-claude-login.log -dmS claude-login bash -lic 'cd /workspace/repo && claude --no-chrome'
 ```
 
 `-L -Logfile` matters: `screen` sessions are otherwise invisible to `kubectl logs`/
@@ -139,7 +139,7 @@ the marker file and exits — the pod restarts (StatefulSet pods always use
 runs:
 
 ```sh
-screen -L -Logfile /tmp/cc-rc-remote-control.log -dmS remote-control bash -lic 'claude remote-control --name <name> --permission-mode <mode> --spawn <mode> --capacity <n>'
+screen -L -Logfile /tmp/cc-rc-remote-control.log -dmS remote-control bash -lic 'cd /workspace/repo && claude remote-control --name <name> --permission-mode <mode> --spawn <mode> --capacity <n>'
 ```
 
 `--name` defaults to the pod's hostname (e.g. `cc-rc-myorg-myrepo-0`) unless
@@ -185,13 +185,13 @@ Pebble entrypoint relay that to its own stdout (otherwise it's only visible via
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| git | object | `{"autoSetupRemote":true,"colorUi":"auto","defaultBranch":"main","editor":"","email":"","globalIgnore":["*~",".*.swp",".DS_Store","/target","*.egg-info","*.pyc","__pycache__","**/.claude/settings.local.json"],"logDecorate":"short","name":"","pushDefault":"upstream"}` | Git identity and global config for the `dev` user inside each agent, rendered into ~/.gitconfig and ~/.gitignore_global via a ConfigMap. Commit signing is intentionally not configured here. |
+| git | object | `{"autoSetupRemote":true,"colorUi":"auto","defaultBranch":"main","editor":"","email":"","globalIgnore":["*~",".*.swp",".DS_Store","/target","*.egg-info","*.pyc","__pycache__","**/.claude/settings.local.json","**/.claude/worktrees/"],"logDecorate":"short","name":"","pushDefault":"upstream"}` | Git identity and global config for the `dev` user inside each agent, rendered into ~/.gitconfig and ~/.gitignore_global via a ConfigMap. Commit signing is intentionally not configured here. |
 | git.autoSetupRemote | bool | `true` | push.autoSetupRemote |
 | git.colorUi | string | `"auto"` | color.ui |
 | git.defaultBranch | string | `"main"` | init.defaultBranch |
 | git.editor | string | `""` | core.editor. Left unset (no editor configured) when empty. |
 | git.email | string | `""` | Commit author email. Required. |
-| git.globalIgnore | list | `["*~",".*.swp",".DS_Store","/target","*.egg-info","*.pyc","__pycache__","**/.claude/settings.local.json"]` | Patterns written to ~/.gitignore_global and wired up via core.excludesfile. |
+| git.globalIgnore | list | `["*~",".*.swp",".DS_Store","/target","*.egg-info","*.pyc","__pycache__","**/.claude/settings.local.json","**/.claude/worktrees/"]` | Patterns written to ~/.gitignore_global and wired up via core.excludesfile. |
 | git.logDecorate | string | `"short"` | log.decorate |
 | git.name | string | `""` | Commit author name. Required. |
 | git.pushDefault | string | `"upstream"` | push.default |
