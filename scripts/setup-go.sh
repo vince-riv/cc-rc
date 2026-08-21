@@ -18,3 +18,7 @@ DELVE_VERSION=v1.27.1
 GOBIN=/usr/local/bin go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}
 GOBIN=/usr/local/bin go install github.com/go-delve/delve/cmd/dlv@${DELVE_VERSION}
 rm -rf /root/go /root/.cache/go-build
+
+go version
+golangci-lint version
+dlv version

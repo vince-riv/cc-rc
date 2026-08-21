@@ -33,7 +33,22 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         screen \
         tmux \
         rsync \
-        file
+        file \
+        jq \
+        tree \
+        gnupg \
+        kubectx \
+        libssl-dev \
+        libffi-dev \
+        libyaml-dev \
+        libreadline-dev \
+        zlib1g-dev \
+        autoconf \
+        automake \
+        bison \
+        flex \
+        pkg-config \
+        cmake
 
 RUN locale-gen en_US.UTF-8 && update-locale LANG=en_US.UTF-8
 ENV LANG=en_US.UTF-8 \
@@ -61,6 +76,16 @@ RUN --mount=type=bind,source=scripts/setup-go-containerregistry.sh,target=/opt/b
 RUN --mount=type=bind,source=scripts/setup-helm.sh,target=/opt/build-scripts/setup-helm.sh \
     --mount=type=tmpfs,target=/tmp \
     bash /opt/build-scripts/setup-helm.sh
+
+# kubectl, latest stable release (not in Ubuntu's apt repos at all).
+RUN --mount=type=bind,source=scripts/setup-kubectl.sh,target=/opt/build-scripts/setup-kubectl.sh \
+    --mount=type=tmpfs,target=/tmp \
+    bash /opt/build-scripts/setup-kubectl.sh
+
+# argocd CLI, latest release (also not in Ubuntu's apt repos).
+RUN --mount=type=bind,source=scripts/setup-argocd.sh,target=/opt/build-scripts/setup-argocd.sh \
+    --mount=type=tmpfs,target=/tmp \
+    bash /opt/build-scripts/setup-argocd.sh
 
 # GitHub CLI, latest release straight from GitHub (Ubuntu's apt package trails).
 RUN --mount=type=bind,source=scripts/setup-gh.sh,target=/opt/build-scripts/setup-gh.sh \

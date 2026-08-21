@@ -14,3 +14,4 @@ curl -fsSL -o /tmp/gh_checksums.txt \
 (cd /tmp && grep " ${tarball}\$" gh_checksums.txt | sha256sum -c -)
 tar -xzf "/tmp/${tarball}" -C /tmp
 install -m 0755 "/tmp/gh_${version}_linux_${arch}/bin/gh" /usr/local/bin/gh
+gh --version
