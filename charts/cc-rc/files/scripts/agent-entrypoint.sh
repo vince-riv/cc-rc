@@ -17,22 +17,29 @@ is_remote_control_running() {
 if [ ! -f "$MARKER" ]; then
   echo "No login marker at $MARKER - starting first-time claude login setup."
   echo "Attach with: kubectl exec -it \$(hostname) -- screen -r claude-login"
-  echo "Then run /login, and once logged in, run: claude remote-control"
+  echo "That drops you into an interactive shell with instructions printed"
+  echo "(the same instructions show up in any 'kubectl exec -it ... -- bash' too)."
   echo "Session output is also tailed below (and kept at $LOGIN_LOG)."
   : > "$LOGIN_LOG"
-  screen -L -Logfile "$LOGIN_LOG" -dmS claude-login bash -lic 'cd /workspace/repo && claude --no-chrome'
+  screen -L -Logfile "$LOGIN_LOG" -dmS claude-login bash -lic 'cd /workspace/repo && exec bash -li'
   tail -F "$LOGIN_LOG" &
   login_tail_pid=$!
 
-  echo "Waiting for 'claude remote-control' to be started inside that session..."
-  while ! is_remote_control_running; do
+  echo "Waiting up to ${RC_FIRST_BOOT_TIMEOUT}s for cc-rc-finish-login to be run" \
+       "(not auto-detected - claude remote-control's first real run can take" \
+       "a few minutes to configure, so its mere appearance isn't treated as done)."
+  start_time=$(date +%s)
+  while [ ! -f "$MARKER" ]; do
+    now=$(date +%s)
+    if [ $(( now - start_time )) -ge "$RC_FIRST_BOOT_TIMEOUT" ]; then
+      echo "No login completed within ${RC_FIRST_BOOT_TIMEOUT}s - exiting so the pod restarts and retries."
+      exit 1
+    fi
     sleep 5
   done
   kill "$login_tail_pid" 2>/dev/null || true
 
-  echo "Detected claude remote-control running - marking login complete."
-  touch "$MARKER"
-  echo "Exiting so the pod restarts into steady-state mode."
+  echo "Login marker present - exiting so the pod restarts into steady-state mode."
   exit 0
 fi
 

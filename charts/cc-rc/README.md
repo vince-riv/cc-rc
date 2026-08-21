@@ -116,12 +116,12 @@ git:
 
 ## Claude login and remote-control
 
-On its first boot, each agent starts `claude` in a detached, logged `screen` session
-(checked via a `~/.cc-rc/login-complete` marker file on the home PVC, so this only
-happens once per repo, ever — it persists across restarts):
+On its first boot, each agent starts a detached, logged `screen` session with an
+interactive login shell in it (checked via a `~/.cc-rc/login-complete` marker file on
+the home PVC, so this only happens once per repo, ever — it persists across restarts):
 
 ```sh
-screen -L -Logfile /tmp/cc-rc-claude-login.log -dmS claude-login bash -lic 'cd /workspace/repo && claude --no-chrome'
+screen -L -Logfile /tmp/cc-rc-claude-login.log -dmS claude-login bash -lic 'cd /workspace/repo && exec bash -li'
 ```
 
 `-L -Logfile` matters: `screen` sessions are otherwise invisible to `kubectl logs`/
@@ -130,13 +130,19 @@ including any errors — shows up there too; attach interactively if needed:
 
 ```sh
 kubectl exec -it <pod> -- screen -r claude-login
-# inside the session: /login, then once logged in: claude remote-control
 ```
 
-Once the agent detects `claude remote-control` running inside that session, it writes
-the marker file and exits — the pod restarts (StatefulSet pods always use
-`restartPolicy: Always`) into steady-state mode, where every subsequent boot instead
-runs:
+Every interactive bash shell in the container — that session, or any ad-hoc
+`kubectl exec -it <pod> -- bash` — runs `files/scripts/bash-prompt-hook.sh` (via
+`$PROMPT_COMMAND`, chart-set, not baked into the image) once per shell session. While
+login is incomplete it prints instructions (`claude`, then `/login`) and defines a
+`cc-rc-finish-login` helper. Completion is **only** signaled by explicitly running
+`cc-rc-finish-login` — never auto-detected from a running `claude remote-control`
+process, since its first real run can take a few minutes to configure, and treating
+its mere appearance as "done" risks moving on before that finishes. Running
+`cc-rc-finish-login` writes the marker file; the agent then exits — the pod restarts
+(StatefulSet pods always use `restartPolicy: Always`) into steady-state mode, where
+every subsequent boot instead runs:
 
 ```sh
 screen -L -Logfile /tmp/cc-rc-remote-control.log -dmS remote-control bash -lic 'cd /workspace/repo && claude remote-control --name <name> --permission-mode <mode> --spawn <mode> --capacity <n>'
@@ -144,7 +150,7 @@ screen -L -Logfile /tmp/cc-rc-remote-control.log -dmS remote-control bash -lic '
 
 `--name` defaults to the pod's hostname (e.g. `cc-rc-myorg-myrepo-0`) unless
 `repos[].remoteControl.name` is set. `--permission-mode`, `--spawn`, `--capacity`, and
-`unhealthyTimeoutSeconds` come from `remoteControl.*` (global defaults) or
+both timeouts below come from `remoteControl.*` (global defaults) or
 `repos[].remoteControl.*` (per-repo override):
 
 ```yaml
@@ -152,7 +158,8 @@ remoteControl:
   permissionMode: bypassPermissions   # acceptEdits | auto | bypassPermissions | default | dontAsk | plan
   spawn: worktree                     # same-dir | worktree | session
   capacity: 8
-  unhealthyTimeoutSeconds: 45
+  unhealthyTimeoutSeconds: 45         # steady-state: how long remote-control may be down before restarting
+  firstBootTimeoutSeconds: 900        # first boot: how long to wait for a human to finish /login
 ```
 
 The container's readiness probe checks for a running `claude remote-control` process
@@ -214,7 +221,8 @@ Pebble entrypoint relay that to its own stdout (otherwise it's only visible via
 | proxy.probes | object | `{"quiet":true}` | Readiness/liveness probe behavior. The startup probe always uses tcpSocket, regardless of this setting. |
 | proxy.probes.quiet | bool | `true` | When true (default), readiness/liveness probes check for a LISTEN socket via /proc/net/tcp[6] instead of connecting - squid can't log a connection it never saw, so this keeps NONE_NONE/000 error:transaction-end-before-headers noise out of the access log. This is a weaker check than tcpSocket: it confirms squid is listening, not that it's actually accepting connections. Set to false to use tcpSocket instead, at the cost of that log noise on every probe. |
 | proxy.revisionHistoryLimit | int | `5` | Number of old ReplicaSets to keep for rollback (Deployment's revisionHistoryLimit). |
-| remoteControl | object | `{"capacity":8,"permissionMode":"bypassPermissions","spawn":"worktree","unhealthyTimeoutSeconds":45}` | Defaults for the `claude remote-control` invocation each agent runs once login is complete (see the seed-home/clone-repo init containers and the agent container's startup logic). Any of these can be overridden per-repo via `repos[].remoteControl`. |
+| remoteControl | object | `{"capacity":8,"firstBootTimeoutSeconds":900,"permissionMode":"bypassPermissions","spawn":"worktree","unhealthyTimeoutSeconds":45}` | Defaults for the `claude remote-control` invocation each agent runs once login is complete (see the seed-home/clone-repo init containers and the agent container's startup logic). Any of these can be overridden per-repo via `repos[].remoteControl`. |
+| remoteControl.firstBootTimeoutSeconds | int | `900` | Seconds to wait, on first boot (no login-complete marker yet), for a human to finish `claude`'s /login flow before the agent container exits and the pod restarts to retry. Much longer than unhealthyTimeoutSeconds since it's bounding an interactive human step, not a crash. |
 | remoteControl.unhealthyTimeoutSeconds | int | `45` | Seconds `claude remote-control` may be down (never started, or crashed) before the agent container exits, restarting the pod. Kept fairly short by default so a genuine crash self-heals promptly; raise it (e.g. via --set) while debugging a startup failure, since it's also the window you have to `kubectl exec` in and inspect before the container cycles. |
 | repos | list | `[]` | One StatefulSet is created per entry. `org`/`repo` are the GitHub org and repo name. Optional per-entry `resources`, `storage`, and `remoteControl` override the defaults below. `resources` is deep-merged over the top-level `resources` default, so a repo can override just cpu or just memory without having to repeat the other. |
 | resources | object | `{}` | Default container resources for the per-repo agent container. Empty means no requests/limits are set. |

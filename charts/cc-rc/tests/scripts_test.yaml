@@ -58,13 +58,26 @@ tests:
           path: data["agent-entrypoint.sh"]
           # -L -Logfile captures the screen session's output (otherwise
           # invisible via kubectl logs/stern), tailed into our own stdout.
-          pattern: "screen -L -Logfile \"\\$LOGIN_LOG\" -dmS claude-login bash -lic 'cd /workspace/repo && claude --no-chrome'"
+          # An interactive shell (not claude directly), so PROMPT_COMMAND's
+          # instructions/cc-rc-finish-login are available and claude exiting
+          # doesn't tear down the whole session.
+          pattern: "screen -L -Logfile \"\\$LOGIN_LOG\" -dmS claude-login bash -lic 'cd /workspace/repo && exec bash -li'"
       - matchRegex:
           path: data["agent-entrypoint.sh"]
           pattern: 'tail -F "\$LOGIN_LOG" &'
       - matchRegex:
           path: data["agent-entrypoint.sh"]
-          pattern: "touch \"\\$MARKER\""
+          # First-boot completion is signaled only via the marker file
+          # (written by cc-rc-finish-login, see bash-prompt-hook.sh) -
+          # deliberately NOT auto-detected from a running claude
+          # remote-control process, since its first real run can take a
+          # few minutes to configure.
+          pattern: 'while \[ ! -f "\$MARKER" \]; do'
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          # bounded wait: gives up and lets the pod restart/retry rather
+          # than waiting forever for a human who may never show up.
+          pattern: '-ge "\$RC_FIRST_BOOT_TIMEOUT" \]; then'
       - matchRegex:
           path: data["agent-entrypoint.sh"]
           pattern: "screen -L -Logfile \"\\$RC_LOG\" -dmS remote-control bash -lic \"cd /workspace/repo && claude remote-control --name \\$\\{NAME\\} --permission-mode \\$\\{RC_PERMISSION_MODE\\} --spawn \\$\\{RC_SPAWN\\} --capacity \\$\\{RC_CAPACITY\\}\""
@@ -78,3 +91,17 @@ tests:
           # `kubectl exec` in and debug a startup failure before the
           # container exits/restarts.
           pattern: '-ge "\$RC_UNHEALTHY_TIMEOUT" \]; then'
+
+  - it: bash-prompt-hook.sh prints login instructions once and defines cc-rc-finish-login
+    asserts:
+      - matchRegex:
+          path: data["bash-prompt-hook.sh"]
+          pattern: "cc-rc-finish-login\\(\\) \\{"
+      - matchRegex:
+          path: data["bash-prompt-hook.sh"]
+          pattern: "touch /home/dev/\\.cc-rc/login-complete"
+      - matchRegex:
+          path: data["bash-prompt-hook.sh"]
+          # only prints once per shell session (guarded by
+          # CC_RC_INSTRUCTIONS_SHOWN), and only while login is incomplete.
+          pattern: '\[ -z "\$\{CC_RC_INSTRUCTIONS_SHOWN:-\}" \] && \[ ! -f /home/dev/\.cc-rc/login-complete \]'

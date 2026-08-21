@@ -11,3 +11,5 @@ data:
     {{- .Files.Get "files/scripts/clone-repo.sh" | nindent 4 }}
   agent-entrypoint.sh: |
     {{- .Files.Get "files/scripts/agent-entrypoint.sh" | nindent 4 }}
+  bash-prompt-hook.sh: |
+    {{- .Files.Get "files/scripts/bash-prompt-hook.sh" | nindent 4 }}

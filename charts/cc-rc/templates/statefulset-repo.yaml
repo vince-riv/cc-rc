@@ -17,6 +17,7 @@
 {{- $rcSpawn := $rc.spawn | default $root.Values.remoteControl.spawn }}
 {{- $rcCapacity := $rc.capacity | default $root.Values.remoteControl.capacity }}
 {{- $rcUnhealthyTimeout := $rc.unhealthyTimeoutSeconds | default $root.Values.remoteControl.unhealthyTimeoutSeconds }}
+{{- $rcFirstBootTimeout := $rc.firstBootTimeoutSeconds | default $root.Values.remoteControl.firstBootTimeoutSeconds }}
 {{- $rcName := $rc.name | default "" }}
 ---
 apiVersion: v1
@@ -152,6 +153,14 @@ spec:
               value: {{ $rcCapacity | quote }}
             - name: RC_UNHEALTHY_TIMEOUT
               value: {{ $rcUnhealthyTimeout | quote }}
+            - name: RC_FIRST_BOOT_TIMEOUT
+              value: {{ $rcFirstBootTimeout | quote }}
+            # Fires on every prompt in an interactive bash shell in this
+            # container (the claude-login screen session, and any ad-hoc
+            # `kubectl exec -it ... -- bash`) - not just the login screen
+            # session, so instructions show up wherever someone looks.
+            - name: PROMPT_COMMAND
+              value: "source /opt/cc-rc/scripts/bash-prompt-hook.sh"
           # No livenessProbe: it would kill the container on kubelet's own
           # schedule, bypassing RC_UNHEALTHY_TIMEOUT - the script manages its
           # own exit-on-unhealthy so that timeout (and the debugging window

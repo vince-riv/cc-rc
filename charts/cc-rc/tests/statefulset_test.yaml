@@ -460,8 +460,20 @@ tests:
           content:
             name: RC_UNHEALTHY_TIMEOUT
             value: "45"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RC_FIRST_BOOT_TIMEOUT
+            value: "900"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PROMPT_COMMAND
+            value: "source /opt/cc-rc/scripts/bash-prompt-hook.sh"
 
-  - it: a repo can override remote-control name/permissionMode/spawn/capacity/unhealthyTimeoutSeconds independently of the chart default
+  - it: a repo can override remote-control name/permissionMode/spawn/capacity/unhealthyTimeoutSeconds/firstBootTimeoutSeconds independently of the chart default
     template: statefulset-repo.yaml
     set:
       remoteControl:
@@ -475,6 +487,7 @@ tests:
             name: custom-name
             capacity: 12
             unhealthyTimeoutSeconds: 300
+            firstBootTimeoutSeconds: 1800
     asserts:
       - documentIndex: 1
         contains:
@@ -506,6 +519,12 @@ tests:
           content:
             name: RC_UNHEALTHY_TIMEOUT
             value: "300"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RC_FIRST_BOOT_TIMEOUT
+            value: "1800"
 
   - it: fails when remoteControl.permissionMode is not a recognized value
     template: statefulset-repo.yaml

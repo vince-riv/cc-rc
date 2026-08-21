@@ -73,6 +73,7 @@ repos: []
   #     spawn: worktree
   #     capacity: 8
   #     unhealthyTimeoutSeconds: 45
+  #     firstBootTimeoutSeconds: 900
 
 # -- Number of old ControllerRevisions to keep for rollback (StatefulSet's
 # revisionHistoryLimit) for each per-repo agent StatefulSet.
@@ -105,6 +106,11 @@ remoteControl:
   # while debugging a startup failure, since it's also the window you have to
   # `kubectl exec` in and inspect before the container cycles.
   unhealthyTimeoutSeconds: 45
+  # -- Seconds to wait, on first boot (no login-complete marker yet), for a
+  # human to finish `claude`'s /login flow before the agent container exits
+  # and the pod restarts to retry. Much longer than unhealthyTimeoutSeconds
+  # since it's bounding an interactive human step, not a crash.
+  firstBootTimeoutSeconds: 900
 
 # -- Default container resources for the per-repo agent container. Empty means no
 # requests/limits are set.
