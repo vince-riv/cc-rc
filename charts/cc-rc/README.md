@@ -171,12 +171,13 @@ Raise it (e.g. `--set remoteControl.unhealthyTimeoutSeconds=600`) to get more ti
 `kubectl exec -it <pod> -- bash` in and debug a startup failure — the tailed log and
 `screen -r remote-control` both stay attachable throughout that window.
 
-## Scheduling (nodeSelector / affinity / PDB)
+## Scheduling (nodeSelector / affinity / tolerations / PDB)
 
-Squid (`proxy.nodeSelector`/`proxy.affinity`) and the per-repo agent StatefulSets
-(top-level `nodeSelector`/`affinity`, overridable per-repo via
-`repos[].nodeSelector`/`repos[].affinity` — a full replace, not a merge, when set) are
-configured independently; there's no single shared/global setting covering both.
+Squid (`proxy.nodeSelector`/`proxy.affinity`/`proxy.tolerations`) and the per-repo
+agent StatefulSets (top-level `nodeSelector`/`affinity`/`tolerations`, overridable
+per-repo via `repos[].nodeSelector`/`repos[].affinity`/`repos[].tolerations` — a full
+replace, not a merge, when set) are configured independently; there's no single
+shared/global setting covering both.
 
 When `proxy.replicaCount > 1` and `proxy.affinity` is left empty, a preferred
 `podAntiAffinity` (`topologyKey: kubernetes.io/hostname`) is generated automatically,
@@ -239,7 +240,7 @@ Pebble entrypoint relay that to its own stdout (otherwise it's only visible via
 | networkPolicy.dns.podSelector | object | `{"k8s-app":"kube-dns"}` | Label selector matching the DNS resolver pods. Varies by distro/cluster (kubeadm/k3s/EKS default to k8s-app=kube-dns; some CoreDNS installs use k8s-app=coredns instead). |
 | nodeSelector | object | `{}` | Default nodeSelector for every per-repo agent StatefulSet. Override per-repo via `repos[].nodeSelector` (full replace, not merged with this default). |
 | podFsGroup | int | `1000` | Group ID applied via pod securityContext.fsGroup so freshly-mounted PVCs are writable by the image's non-root `dev` user (created via `useradd -m`, uid/gid 1000). |
-| proxy | object | `{"affinity":{},"allowList":[],"allowedPortsWhenOpen":[80,443,8080,8443,3000,5000,8000,9000],"defaultBlocked":["cluster.local","192.168.0.0/16","10.0.0.0/8","172.16.0.0/12"],"denyList":[],"image":{"pullPolicy":"IfNotPresent","repository":"ubuntu/squid","tag":"7.2-26.04_edge"},"nodeSelector":{},"podDisruptionBudget":{"enabled":false,"minAvailable":1},"probes":{"quiet":true},"replicaCount":1,"resources":{},"revisionHistoryLimit":5,"service":{"port":3128,"type":"ClusterIP"}}` | Squid egress proxy configuration. |
+| proxy | object | `{"affinity":{},"allowList":[],"allowedPortsWhenOpen":[80,443,8080,8443,3000,5000,8000,9000],"defaultBlocked":["cluster.local","192.168.0.0/16","10.0.0.0/8","172.16.0.0/12"],"denyList":[],"image":{"pullPolicy":"IfNotPresent","repository":"ubuntu/squid","tag":"7.2-26.04_edge"},"nodeSelector":{},"podDisruptionBudget":{"enabled":false,"minAvailable":1},"probes":{"quiet":true},"replicaCount":1,"resources":{},"revisionHistoryLimit":5,"service":{"port":3128,"type":"ClusterIP"},"tolerations":[]}` | Squid egress proxy configuration. |
 | proxy.affinity | object | `{}` | affinity for the squid Deployment. When left empty AND replicaCount > 1, a preferred podAntiAffinity (topologyKey: kubernetes.io/hostname) is generated automatically, spreading squid replicas across nodes. Set this explicitly to take full control instead (it's used as-is, replacing that auto-generation). |
 | proxy.allowList | list | `[]` | Destinations agents are allowed to reach. Each entry is either a domain (e.g. "example.com", or ".example.com" to also match subdomains) or a CIDR (detected by the presence of "/", e.g. "140.82.112.0/20").  When EMPTY: all web traffic is permitted (subject to denyList/defaultBlocked below), on the ports listed in allowedPortsWhenOpen, plus github.com:22 for git+ssh. When NON-EMPTY: only these destinations are reachable (on ports 80/443). There is NO automatic github.com:22 carve-out in this mode — add github.com yourself if ssh access to it is needed. |
 | proxy.allowedPortsWhenOpen | list | `[80,443,8080,8443,3000,5000,8000,9000]` | Ports permitted for any destination when allowList is EMPTY (open-web mode). Ignored in strict allow-list mode (only 80/443 are opened there). |
@@ -251,6 +252,7 @@ Pebble entrypoint relay that to its own stdout (otherwise it's only visible via
 | proxy.probes | object | `{"quiet":true}` | Readiness/liveness probe behavior. The startup probe always uses tcpSocket, regardless of this setting. |
 | proxy.probes.quiet | bool | `true` | When true (default), readiness/liveness probes check for a LISTEN socket via /proc/net/tcp[6] instead of connecting - squid can't log a connection it never saw, so this keeps NONE_NONE/000 error:transaction-end-before-headers noise out of the access log. This is a weaker check than tcpSocket: it confirms squid is listening, not that it's actually accepting connections. Set to false to use tcpSocket instead, at the cost of that log noise on every probe. |
 | proxy.revisionHistoryLimit | int | `5` | Number of old ReplicaSets to keep for rollback (Deployment's revisionHistoryLimit). |
+| proxy.tolerations | list | `[]` | tolerations for the squid Deployment. |
 | remoteControl | object | `{"capacity":8,"firstBootTimeoutSeconds":900,"permissionMode":"bypassPermissions","spawn":"worktree","unhealthyTimeoutSeconds":45}` | Defaults for the `claude remote-control` invocation each agent runs once login is complete (see the seed-home/clone-repo init containers and the agent container's startup logic). Any of these can be overridden per-repo via `repos[].remoteControl`. |
 | remoteControl.firstBootTimeoutSeconds | int | `900` | Seconds to wait, on first boot (no login-complete marker yet), for a human to finish `claude`'s /login flow before the agent container exits and the pod restarts to retry. Much longer than unhealthyTimeoutSeconds since it's bounding an interactive human step, not a crash. |
 | remoteControl.unhealthyTimeoutSeconds | int | `45` | Seconds `claude remote-control` may be down (never started, or crashed) before the agent container exits, restarting the pod. Kept fairly short by default so a genuine crash self-heals promptly; raise it (e.g. via --set) while debugging a startup failure, since it's also the window you have to `kubectl exec` in and inspect before the container cycles. |
@@ -261,6 +263,7 @@ Pebble entrypoint relay that to its own stdout (otherwise it's only visible via
 | storage.homeSize | string | `"5Gi"` | Size of the PVC mounted at /home/dev (the dev user's entire home directory — claude config/credentials, shell history, etc. — not just ~/.claude). |
 | storage.storageClassName | string | `""` | StorageClass for both PVCs. "" uses the cluster default. |
 | storage.workspaceSize | string | `"5Gi"` | Size of the PVC mounted at /workspace |
+| tolerations | list | `[]` | Default tolerations for every per-repo agent StatefulSet. Override per-repo via `repos[].tolerations` (full replace, not merged with this default). |
 
 ## Rendering and testing locally
 

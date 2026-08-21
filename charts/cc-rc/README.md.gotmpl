@@ -174,12 +174,13 @@ Raise it (e.g. `--set remoteControl.unhealthyTimeoutSeconds=600`) to get more ti
 `kubectl exec -it <pod> -- bash` in and debug a startup failure — the tailed log and
 `screen -r remote-control` both stay attachable throughout that window.
 
-## Scheduling (nodeSelector / affinity / PDB)
+## Scheduling (nodeSelector / affinity / tolerations / PDB)
 
-Squid (`proxy.nodeSelector`/`proxy.affinity`) and the per-repo agent StatefulSets
-(top-level `nodeSelector`/`affinity`, overridable per-repo via
-`repos[].nodeSelector`/`repos[].affinity` — a full replace, not a merge, when set) are
-configured independently; there's no single shared/global setting covering both.
+Squid (`proxy.nodeSelector`/`proxy.affinity`/`proxy.tolerations`) and the per-repo
+agent StatefulSets (top-level `nodeSelector`/`affinity`/`tolerations`, overridable
+per-repo via `repos[].nodeSelector`/`repos[].affinity`/`repos[].tolerations` — a full
+replace, not a merge, when set) are configured independently; there's no single
+shared/global setting covering both.
 
 When `proxy.replicaCount > 1` and `proxy.affinity` is left empty, a preferred
 `podAntiAffinity` (`topologyKey: kubernetes.io/hostname`) is generated automatically,

@@ -79,6 +79,7 @@ repos: []
   #   nodeSelector:
   #     disktype: ssd
   #   affinity: {}
+  #   tolerations: []
 
 # -- Default nodeSelector for every per-repo agent StatefulSet. Override per-repo via
 # `repos[].nodeSelector` (full replace, not merged with this default).
@@ -87,6 +88,10 @@ nodeSelector: {}
 # -- Default affinity for every per-repo agent StatefulSet. Override per-repo via
 # `repos[].affinity` (full replace, not merged with this default).
 affinity: {}
+
+# -- Default tolerations for every per-repo agent StatefulSet. Override per-repo via
+# `repos[].tolerations` (full replace, not merged with this default).
+tolerations: []
 
 # -- Number of old ControllerRevisions to keep for rollback (StatefulSet's
 # revisionHistoryLimit) for each per-repo agent StatefulSet.
@@ -162,6 +167,9 @@ proxy:
   # automatically, spreading squid replicas across nodes. Set this explicitly to
   # take full control instead (it's used as-is, replacing that auto-generation).
   affinity: {}
+
+  # -- tolerations for the squid Deployment.
+  tolerations: []
 
   # -- PodDisruptionBudget for the squid Deployment. Only created when `enabled` is
   # true AND `replicaCount` > 1 (a PDB with a single replica just blocks voluntary

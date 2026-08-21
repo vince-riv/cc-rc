@@ -21,6 +21,7 @@
 {{- $rcName := $rc.name | default "" }}
 {{- $nodeSelector := $repoEntry.nodeSelector | default $root.Values.nodeSelector }}
 {{- $affinity := $repoEntry.affinity | default $root.Values.affinity }}
+{{- $tolerations := $repoEntry.tolerations | default $root.Values.tolerations }}
 ---
 apiVersion: v1
 kind: Service
@@ -77,6 +78,10 @@ spec:
       {{- end }}
       {{- with $affinity }}
       affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $tolerations }}
+      tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       initContainers:

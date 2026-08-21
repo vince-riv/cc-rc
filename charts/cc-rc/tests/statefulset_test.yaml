@@ -284,11 +284,14 @@ tests:
           path: spec.template.spec.nodeSelector.disktype
           value: ssd
 
-  - it: a repo's nodeSelector/affinity fully replaces the top-level default, not merges with it
+  - it: a repo's nodeSelector/affinity/tolerations fully replaces the top-level default, not merges with it
     template: statefulset-repo.yaml
     set:
       nodeSelector:
         disktype: ssd
+      tolerations:
+        - key: default-taint
+          operator: Exists
       repos:
         - org: myorg
           repo: myrepo
@@ -302,6 +305,10 @@ tests:
                       - key: kubernetes.io/arch
                         operator: In
                         values: ["arm64"]
+          tolerations:
+            - key: gpu
+              operator: Exists
+              effect: NoSchedule
     asserts:
       - documentIndex: 1
         equal:
@@ -314,6 +321,13 @@ tests:
         equal:
           path: spec.template.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].values[0]
           value: arm64
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.tolerations
+          value:
+            - key: gpu
+              operator: Exists
+              effect: NoSchedule
 
   - it: mounts the home and workspace PVCs at the expected paths
     template: statefulset-repo.yaml

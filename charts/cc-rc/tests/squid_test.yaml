@@ -107,6 +107,24 @@ tests:
           path: spec.template.spec.nodeSelector.disktype
           value: ssd
 
+  - it: no tolerations by default, set when proxy.tolerations is set
+    template: deployment-squid.yaml
+    asserts:
+      - notExists:
+          path: spec.template.spec.tolerations
+  - it: sets tolerations when proxy.tolerations is set
+    template: deployment-squid.yaml
+    set:
+      proxy.tolerations:
+        - key: dedicated
+          operator: Equal
+          value: squid
+          effect: NoSchedule
+    asserts:
+      - equal:
+          path: spec.template.spec.tolerations[0].key
+          value: dedicated
+
   - it: auto-generates a preferred podAntiAffinity when replicas > 1 and no explicit affinity is set
     template: deployment-squid.yaml
     set:

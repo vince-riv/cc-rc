@@ -32,6 +32,10 @@ spec:
       affinity:
         {{- include "cc-rc.squidAntiAffinity" . | nindent 8 }}
       {{- end }}
+      {{- with .Values.proxy.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: squid
           image: "{{ .Values.proxy.image.repository }}:{{ .Values.proxy.image.tag }}"
