@@ -85,6 +85,23 @@ Fully qualified squid Service name.
 {{- end -}}
 
 {{/*
+Preferred podAntiAffinity spreading squid replicas across nodes, keyed on the
+proxy selector labels. Only meant to be used when proxy.affinity is empty and
+proxy.replicaCount > 1 - explicit proxy.affinity always takes precedence.
+*/}}
+{{- define "cc-rc.squidAntiAffinity" -}}
+podAntiAffinity:
+  preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      podAffinityTerm:
+        topologyKey: kubernetes.io/hostname
+        labelSelector:
+          matchLabels:
+            {{- include "cc-rc.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: proxy
+{{- end -}}
+
+{{/*
 Validate github token configuration. Call from any template that needs the
 Secret to exist (fails the whole render if misconfigured).
 */}}

@@ -19,6 +19,8 @@
 {{- $rcUnhealthyTimeout := $rc.unhealthyTimeoutSeconds | default $root.Values.remoteControl.unhealthyTimeoutSeconds }}
 {{- $rcFirstBootTimeout := $rc.firstBootTimeoutSeconds | default $root.Values.remoteControl.firstBootTimeoutSeconds }}
 {{- $rcName := $rc.name | default "" }}
+{{- $nodeSelector := $repoEntry.nodeSelector | default $root.Values.nodeSelector }}
+{{- $affinity := $repoEntry.affinity | default $root.Values.affinity }}
 ---
 apiVersion: v1
 kind: Service
@@ -69,6 +71,14 @@ spec:
       automountServiceAccountToken: false
       securityContext:
         fsGroup: {{ $root.Values.podFsGroup }}
+      {{- with $nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       initContainers:
         - name: seed-home
           # Mounted at a path other than /home/dev, so the image's baked-in

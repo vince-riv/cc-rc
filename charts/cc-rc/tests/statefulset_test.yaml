@@ -238,6 +238,83 @@ tests:
             name: NO_PROXY
             value: localhost,127.0.0.1,.svc,.svc.cluster.local,.cluster.local,.anthropic.com
 
+  - it: no nodeSelector/affinity by default
+    template: statefulset-repo.yaml
+    set:
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - documentIndex: 1
+        notExists:
+          path: spec.template.spec.nodeSelector
+      - documentIndex: 1
+        notExists:
+          path: spec.template.spec.affinity
+
+  - it: applies the top-level nodeSelector/affinity defaults to every repo's StatefulSet
+    template: statefulset-repo.yaml
+    set:
+      nodeSelector:
+        disktype: ssd
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/arch
+                    operator: In
+                    values: ["amd64"]
+      repos:
+        - org: alpha
+          repo: one
+        - org: beta
+          repo: two
+    asserts:
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.nodeSelector.disktype
+          value: ssd
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].key
+          value: kubernetes.io/arch
+      - documentIndex: 3
+        equal:
+          path: spec.template.spec.nodeSelector.disktype
+          value: ssd
+
+  - it: a repo's nodeSelector/affinity fully replaces the top-level default, not merges with it
+    template: statefulset-repo.yaml
+    set:
+      nodeSelector:
+        disktype: ssd
+      repos:
+        - org: myorg
+          repo: myrepo
+          nodeSelector:
+            gpu: "true"
+          affinity:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - key: kubernetes.io/arch
+                        operator: In
+                        values: ["arm64"]
+    asserts:
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.nodeSelector.gpu
+          value: "true"
+      - documentIndex: 1
+        notExists:
+          path: spec.template.spec.nodeSelector.disktype
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].values[0]
+          value: arm64
+
   - it: mounts the home and workspace PVCs at the expected paths
     template: statefulset-repo.yaml
     set:

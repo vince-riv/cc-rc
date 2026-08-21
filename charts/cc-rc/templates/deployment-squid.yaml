@@ -21,6 +21,17 @@ spec:
         app.kubernetes.io/component: proxy
     spec:
       automountServiceAccountToken: false
+      {{- with .Values.proxy.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.proxy.affinity }}
+      affinity:
+        {{- toYaml .Values.proxy.affinity | nindent 8 }}
+      {{- else if gt (int .Values.proxy.replicaCount) 1 }}
+      affinity:
+        {{- include "cc-rc.squidAntiAffinity" . | nindent 8 }}
+      {{- end }}
       containers:
         - name: squid
           image: "{{ .Values.proxy.image.repository }}:{{ .Values.proxy.image.tag }}"

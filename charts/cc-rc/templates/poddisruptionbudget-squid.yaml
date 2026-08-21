@@ -1,0 +1,15 @@
+{{- if and .Values.proxy.podDisruptionBudget.enabled (gt (int .Values.proxy.replicaCount) 1) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "cc-rc.fullname" . }}-squid
+  labels:
+    {{- include "cc-rc.labels" . | nindent 4 }}
+    app.kubernetes.io/component: proxy
+spec:
+  minAvailable: {{ .Values.proxy.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "cc-rc.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: proxy
+{{- end }}

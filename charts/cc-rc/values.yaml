@@ -54,6 +54,8 @@ git:
 # Optional per-entry `resources`, `storage`, and `remoteControl` override the defaults
 # below. `resources` is deep-merged over the top-level `resources` default, so a repo
 # can override just cpu or just memory without having to repeat the other.
+# `nodeSelector`/`affinity`, if set, fully replace (not merge with) the top-level
+# `nodeSelector`/`affinity` defaults for that repo's StatefulSet.
 repos: []
   # - org: myorg
   #   repo: myrepo
@@ -74,6 +76,17 @@ repos: []
   #     capacity: 8
   #     unhealthyTimeoutSeconds: 45
   #     firstBootTimeoutSeconds: 900
+  #   nodeSelector:
+  #     disktype: ssd
+  #   affinity: {}
+
+# -- Default nodeSelector for every per-repo agent StatefulSet. Override per-repo via
+# `repos[].nodeSelector` (full replace, not merged with this default).
+nodeSelector: {}
+
+# -- Default affinity for every per-repo agent StatefulSet. Override per-repo via
+# `repos[].affinity` (full replace, not merged with this default).
+affinity: {}
 
 # -- Number of old ControllerRevisions to keep for rollback (StatefulSet's
 # revisionHistoryLimit) for each per-repo agent StatefulSet.
@@ -140,6 +153,23 @@ proxy:
     port: 3128
     type: ClusterIP
   resources: {}
+
+  # -- nodeSelector for the squid Deployment.
+  nodeSelector: {}
+
+  # -- affinity for the squid Deployment. When left empty AND replicaCount > 1, a
+  # preferred podAntiAffinity (topologyKey: kubernetes.io/hostname) is generated
+  # automatically, spreading squid replicas across nodes. Set this explicitly to
+  # take full control instead (it's used as-is, replacing that auto-generation).
+  affinity: {}
+
+  # -- PodDisruptionBudget for the squid Deployment. Only created when `enabled` is
+  # true AND `replicaCount` > 1 (a PDB with a single replica just blocks voluntary
+  # eviction of the only pod).
+  podDisruptionBudget:
+    enabled: false
+    # -- minAvailable, per the same semantics as PodDisruptionBudgetSpec.minAvailable.
+    minAvailable: 1
 
   # -- Readiness/liveness probe behavior. The startup probe always uses
   # tcpSocket, regardless of this setting.

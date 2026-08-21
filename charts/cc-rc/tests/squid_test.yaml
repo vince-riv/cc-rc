@@ -3,6 +3,7 @@ templates:
   - deployment-squid.yaml
   - service-squid.yaml
   - configmap-squid.yaml
+  - poddisruptionbudget-squid.yaml
 set:
   github.token: dummy-token
   git:
@@ -53,6 +54,97 @@ tests:
       - equal:
           path: spec.revisionHistoryLimit
           value: 2
+
+  - it: no nodeSelector/affinity/PDB by default, even with replicas=1
+    template: deployment-squid.yaml
+    asserts:
+      - notExists:
+          path: spec.template.spec.nodeSelector
+      - notExists:
+          path: spec.template.spec.affinity
+
+  - it: no PDB is rendered when podDisruptionBudget.enabled is false, regardless of replicas
+    template: poddisruptionbudget-squid.yaml
+    set:
+      proxy.replicaCount: 3
+      proxy.podDisruptionBudget.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: no PDB is rendered when replicas=1, even if podDisruptionBudget.enabled is true
+    template: poddisruptionbudget-squid.yaml
+    set:
+      proxy.replicaCount: 1
+      proxy.podDisruptionBudget.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders a PDB when enabled and replicas > 1
+    template: poddisruptionbudget-squid.yaml
+    set:
+      proxy.replicaCount: 3
+      proxy.podDisruptionBudget.enabled: true
+      proxy.podDisruptionBudget.minAvailable: 2
+    asserts:
+      - isKind:
+          of: PodDisruptionBudget
+      - equal:
+          path: spec.minAvailable
+          value: 2
+      - equal:
+          path: spec.selector.matchLabels["app.kubernetes.io/component"]
+          value: proxy
+
+  - it: sets nodeSelector when proxy.nodeSelector is set
+    template: deployment-squid.yaml
+    set:
+      proxy.nodeSelector:
+        disktype: ssd
+    asserts:
+      - equal:
+          path: spec.template.spec.nodeSelector.disktype
+          value: ssd
+
+  - it: auto-generates a preferred podAntiAffinity when replicas > 1 and no explicit affinity is set
+    template: deployment-squid.yaml
+    set:
+      proxy.replicaCount: 3
+    asserts:
+      - equal:
+          path: spec.template.spec.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution[0].podAffinityTerm.topologyKey
+          value: kubernetes.io/hostname
+      - equal:
+          path: spec.template.spec.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution[0].podAffinityTerm.labelSelector.matchLabels["app.kubernetes.io/component"]
+          value: proxy
+
+  - it: does not auto-generate anti-affinity when replicas=1
+    template: deployment-squid.yaml
+    set:
+      proxy.replicaCount: 1
+    asserts:
+      - notExists:
+          path: spec.template.spec.affinity
+
+  - it: explicit proxy.affinity replaces auto-generated anti-affinity, even with replicas > 1
+    template: deployment-squid.yaml
+    set:
+      proxy.replicaCount: 3
+      proxy.affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/arch
+                    operator: In
+                    values: ["amd64"]
+    asserts:
+      - notExists:
+          path: spec.template.spec.affinity.podAntiAffinity
+      - equal:
+          path: spec.template.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].key
+          value: kubernetes.io/arch
 
   - it: always uses a tcpSocket startupProbe, regardless of proxy.probes.quiet
     template: deployment-squid.yaml
