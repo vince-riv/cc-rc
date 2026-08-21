@@ -48,6 +48,7 @@ metadata:
 spec:
   serviceName: {{ $name }}
   replicas: 1
+  revisionHistoryLimit: {{ $root.Values.revisionHistoryLimit }}
   selector:
     matchLabels:
       {{- include "cc-rc.selectorLabels" $root | nindent 6 }}

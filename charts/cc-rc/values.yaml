@@ -73,6 +73,10 @@ repos: []
   #     capacity: 8
   #     unhealthyTimeoutSeconds: 45
 
+# -- Number of old ControllerRevisions to keep for rollback (StatefulSet's
+# revisionHistoryLimit) for each per-repo agent StatefulSet.
+revisionHistoryLimit: 5
+
 # -- Default persistent volume sizes for each per-repo agent.
 storage:
   # -- Size of the PVC mounted at /home/dev (the dev user's entire home directory —
@@ -122,6 +126,9 @@ proxy:
     tag: 7.2-26.04_edge
     pullPolicy: IfNotPresent
   replicaCount: 1
+  # -- Number of old ReplicaSets to keep for rollback (Deployment's
+  # revisionHistoryLimit).
+  revisionHistoryLimit: 5
   service:
     port: 3128
     type: ClusterIP

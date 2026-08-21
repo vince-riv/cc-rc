@@ -50,6 +50,31 @@ tests:
           path: metadata.labels["cc-rc.io/repo"]
           value: My_Repo!
 
+  - it: defaults revisionHistoryLimit to 5
+    template: statefulset-repo.yaml
+    set:
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - documentIndex: 1
+        equal:
+          path: spec.revisionHistoryLimit
+          value: 5
+
+  - it: revisionHistoryLimit overrides the default for all per-repo StatefulSets
+    template: statefulset-repo.yaml
+    set:
+      revisionHistoryLimit: 2
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - documentIndex: 1
+        equal:
+          path: spec.revisionHistoryLimit
+          value: 2
+
   - it: uses default PVC sizes when a repo doesn't override storage
     template: statefulset-repo.yaml
     set:

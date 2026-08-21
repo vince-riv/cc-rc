@@ -7,6 +7,7 @@ metadata:
     app.kubernetes.io/component: proxy
 spec:
   replicas: {{ .Values.proxy.replicaCount }}
+  revisionHistoryLimit: {{ .Values.proxy.revisionHistoryLimit }}
   selector:
     matchLabels:
       {{- include "cc-rc.selectorLabels" . | nindent 6 }}
