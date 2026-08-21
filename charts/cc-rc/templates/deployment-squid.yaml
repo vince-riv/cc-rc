@@ -43,14 +43,41 @@ spec:
             - name: squid
               containerPort: {{ .Values.proxy.service.port }}
               protocol: TCP
-          readinessProbe:
+          startupProbe:
             tcpSocket:
               port: squid
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            failureThreshold: 12
+          readinessProbe:
+            {{- if .Values.proxy.probes.quiet }}
+            # tcpSocket would connect then disconnect without sending a
+            # request on every check, which squid logs as NONE_NONE/000
+            # error:transaction-end-before-headers - unfilterable in
+            # squid.conf (see configmap-squid.yaml). Check for a LISTEN
+            # socket directly instead, so squid never sees the probe.
+            exec:
+              command:
+                - sh
+                - -c
+                - awk -v p={{ printf "%04X" (int .Values.proxy.service.port) }} 'BEGIN{ok=0} FNR>1{split($2,a,":"); if (a[2]==p && $4=="0A") ok=1} END{exit !ok}' /proc/net/tcp /proc/net/tcp6
+            {{- else }}
+            tcpSocket:
+              port: squid
+            {{- end }}
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
+            {{- if .Values.proxy.probes.quiet }}
+            exec:
+              command:
+                - sh
+                - -c
+                - awk -v p={{ printf "%04X" (int .Values.proxy.service.port) }} 'BEGIN{ok=0} FNR>1{split($2,a,":"); if (a[2]==p && $4=="0A") ok=1} END{exit !ok}' /proc/net/tcp /proc/net/tcp6
+            {{- else }}
             tcpSocket:
               port: squid
+            {{- end }}
             initialDelaySeconds: 10
             periodSeconds: 20
           volumeMounts:

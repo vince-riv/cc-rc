@@ -127,6 +127,18 @@ proxy:
     type: ClusterIP
   resources: {}
 
+  # -- Readiness/liveness probe behavior. The startup probe always uses
+  # tcpSocket, regardless of this setting.
+  probes:
+    # -- When true (default), readiness/liveness probes check for a LISTEN
+    # socket via /proc/net/tcp[6] instead of connecting - squid can't log a
+    # connection it never saw, so this keeps NONE_NONE/000
+    # error:transaction-end-before-headers noise out of the access log. This
+    # is a weaker check than tcpSocket: it confirms squid is listening, not
+    # that it's actually accepting connections. Set to false to use
+    # tcpSocket instead, at the cost of that log noise on every probe.
+    quiet: true
+
   # -- Destinations agents are allowed to reach.
   # Each entry is either a domain (e.g. "example.com", or ".example.com" to also match
   # subdomains) or a CIDR (detected by the presence of "/", e.g. "140.82.112.0/20").

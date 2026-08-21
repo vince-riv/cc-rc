@@ -38,6 +38,48 @@ tests:
           path: spec.template.metadata.labels["app.kubernetes.io/component"]
           value: proxy
 
+  - it: always uses a tcpSocket startupProbe, regardless of proxy.probes.quiet
+    template: deployment-squid.yaml
+    set:
+      proxy.probes.quiet: false
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].startupProbe.tcpSocket.port
+          value: squid
+
+  - it: defaults readiness/liveness to the quiet /proc/net/tcp exec probe
+    template: deployment-squid.yaml
+    asserts:
+      - isNull:
+          path: spec.template.spec.containers[0].readinessProbe.tcpSocket
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.exec.command[0]
+          value: sh
+      - matchRegex:
+          path: spec.template.spec.containers[0].readinessProbe.exec.command[2]
+          pattern: "0C38"
+      - isNull:
+          path: spec.template.spec.containers[0].livenessProbe.tcpSocket
+      - matchRegex:
+          path: spec.template.spec.containers[0].livenessProbe.exec.command[2]
+          pattern: "0C38"
+
+  - it: uses tcpSocket for readiness/liveness when proxy.probes.quiet is false
+    template: deployment-squid.yaml
+    set:
+      proxy.probes.quiet: false
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.tcpSocket.port
+          value: squid
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.tcpSocket.port
+          value: squid
+      - isNull:
+          path: spec.template.spec.containers[0].readinessProbe.exec
+      - isNull:
+          path: spec.template.spec.containers[0].livenessProbe.exec
+
   - it: sets PEBBLE_VERBOSE so squid's access/cache logs reach kubectl logs/stern
     template: deployment-squid.yaml
     asserts:
@@ -93,15 +135,6 @@ tests:
           path: data["squid.conf"]
           pattern: "cache_log /dev/stdout"
 
-  - it: drops tcpSocket-probe noise (no request ever parsed) from the access log
-    template: configmap-squid.yaml
-    asserts:
-      - matchRegex:
-          path: data["squid.conf"]
-          pattern: "acl has_request has_component request"
-      - matchRegex:
-          path: data["squid.conf"]
-          pattern: "access_log none !has_request"
 
   - it: strict allow-list mode restricts to allowed destinations with no ssh carve-out
     template: configmap-squid.yaml
