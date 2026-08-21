@@ -61,9 +61,10 @@ the 63-char DNS label limit.
 
 {{/*
 Name of the Secret holding GH_TOKEN, whether chart-managed or pre-existing.
+Falls back to "<fullname>-github-token" when github.secretName is unset.
 */}}
 {{- define "cc-rc.githubSecretName" -}}
-{{- .Values.github.existingSecret | default .Values.github.secretName -}}
+{{- .Values.github.existingSecret | default (.Values.github.secretName | default (printf "%s-github-token" (include "cc-rc.fullname" .))) -}}
 {{- end -}}
 
 {{/*
@@ -75,6 +76,14 @@ Key within the GH_TOKEN Secret, whether chart-managed or pre-existing.
 {{- else -}}
 {{- .Values.github.secretKey -}}
 {{- end -}}
+{{- end -}}
+
+{{/*
+Name of the Secret holding the SSH deploy key. Falls back to
+"<fullname>-ssh-key" when sshKey.secretName is unset.
+*/}}
+{{- define "cc-rc.sshKeySecretName" -}}
+{{- .Values.sshKey.secretName | default (printf "%s-ssh-key" (include "cc-rc.fullname" .)) -}}
 {{- end -}}
 
 {{/*

@@ -19,6 +19,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         golang-1.25 \
         golang-1.26 \
         openssh-client \
+        connect-proxy \
         python3 \
         python3-venv \
         python3-pip \

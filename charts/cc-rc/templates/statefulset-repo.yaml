@@ -2,7 +2,8 @@
 {{- include "cc-rc.validateGitIdentity" . -}}
 {{- include "cc-rc.validateRemoteControl" . -}}
 {{- $root := . -}}
-{{- $proxyURL := printf "http://%s.%s.svc.cluster.local:%v" (include "cc-rc.squidServiceName" .) .Release.Namespace .Values.proxy.service.port -}}
+{{- $squidHost := printf "%s.%s.svc.cluster.local" (include "cc-rc.squidServiceName" .) .Release.Namespace -}}
+{{- $proxyURL := printf "http://%s:%v" $squidHost .Values.proxy.service.port -}}
 {{- /* .anthropic.com bypasses the proxy - see NetworkPolicy egress rule
    for 160.79.104.0/23 / 2607:6bc0::/48 that allows this direct route. */ -}}
 {{- $noProxy := "localhost,127.0.0.1,.svc,.svc.cluster.local,.cluster.local,.anthropic.com" -}}
@@ -98,6 +99,27 @@ spec:
               mountPath: /mnt/home-pvc
             - name: scripts
               mountPath: /opt/cc-rc/scripts
+        - name: seed-ssh
+          # Populates ~/.ssh on the home PVC (id_ed25519/.pub from the
+          # sshKey Secret, plus known_hosts if missing) before clone-repo
+          # needs it to git clone over SSH. Same "mount elsewhere, write onto
+          # the PVC" pattern as seed-home, and for the same reason.
+          image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          command: ["/bin/bash", "/opt/cc-rc/scripts/seed-ssh.sh"]
+          env:
+            - name: SQUID_HOST
+              value: {{ $squidHost | quote }}
+            - name: SQUID_PORT
+              value: {{ $root.Values.proxy.service.port | quote }}
+          volumeMounts:
+            - name: home
+              mountPath: /mnt/home-pvc
+            - name: ssh-key
+              mountPath: /mnt/ssh-key
+              readOnly: true
+            - name: scripts
+              mountPath: /opt/cc-rc/scripts
         - name: clone-repo
           image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
           imagePullPolicy: {{ $root.Values.image.pullPolicy }}
@@ -107,24 +129,9 @@ spec:
               value: {{ $repoEntry.org | quote }}
             - name: REPO_NAME
               value: {{ $repoEntry.repo | quote }}
-            - name: GH_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "cc-rc.githubSecretName" $root }}
-                  key: {{ include "cc-rc.githubSecretKey" $root }}
-            - name: HTTP_PROXY
-              value: {{ $proxyURL | quote }}
-            - name: HTTPS_PROXY
-              value: {{ $proxyURL | quote }}
-            - name: http_proxy
-              value: {{ $proxyURL | quote }}
-            - name: https_proxy
-              value: {{ $proxyURL | quote }}
-            - name: NO_PROXY
-              value: {{ $noProxy | quote }}
-            - name: no_proxy
-              value: {{ $noProxy | quote }}
           volumeMounts:
+            - name: home
+              mountPath: /home/dev
             - name: workspace
               mountPath: /workspace
             - name: gitconfig
@@ -206,6 +213,9 @@ spec:
         - name: gitconfig
           configMap:
             name: {{ include "cc-rc.fullname" $root }}-gitconfig
+        - name: ssh-key
+          secret:
+            secretName: {{ include "cc-rc.sshKeySecretName" $root }}
         - name: scripts
           configMap:
             name: {{ include "cc-rc.fullname" $root }}-scripts

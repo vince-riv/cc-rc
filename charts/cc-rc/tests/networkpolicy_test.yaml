@@ -84,6 +84,12 @@ tests:
           path: spec.egress[2].ports[0].port
           value: 443
 
+  - it: has exactly 3 egress rules (DNS, squid, Anthropic) - no separate rule for git+ssh, which tunnels through squid
+    asserts:
+      - lengthEqual:
+          path: spec.egress
+          count: 3
+
   - it: is omitted entirely when networkPolicy.enabled is false
     set:
       networkPolicy.enabled: false

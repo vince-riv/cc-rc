@@ -262,7 +262,7 @@ tests:
           pattern: "cache_log /dev/stdout"
 
 
-  - it: strict allow-list mode restricts to allowed destinations with no ssh carve-out
+  - it: strict allow-list mode restricts to allowed destinations, but still carves out github.com:22 for git+ssh
     template: configmap-squid.yaml
     set:
       proxy.allowList:
@@ -275,9 +275,12 @@ tests:
       - matchRegex:
           path: data["squid.conf"]
           pattern: "acl allow_cidrs dst 140.82.112.0/20"
-      - notMatchRegex:
+      - matchRegex:
           path: data["squid.conf"]
-          pattern: "acl github_ssh"
+          pattern: "acl github_ssh dstdomain github.com"
+      - matchRegex:
+          path: data["squid.conf"]
+          pattern: "http_access allow github_ssh port_22"
       - matchRegex:
           path: data["squid.conf"]
           pattern: "http_access deny all"

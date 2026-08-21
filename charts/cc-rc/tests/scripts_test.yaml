@@ -41,7 +41,44 @@ tests:
           pattern: 'if \[ -d "\$DEST/\.git" \]'
       - matchRegex:
           path: data["clone-repo.sh"]
-          pattern: "https://x-access-token:\\$\\{GH_TOKEN\\}@github\\.com/\\$\\{REPO_ORG\\}/\\$\\{REPO_NAME\\}\\.git"
+          pattern: "git@github\\.com:\\$\\{REPO_ORG\\}/\\$\\{REPO_NAME\\}\\.git"
+
+  - it: seed-ssh.sh copies the SSH key onto the home PVC and seeds known_hosts only if missing
+    asserts:
+      - matchRegex:
+          path: data["seed-ssh.sh"]
+          pattern: 'SSH_DIR="/mnt/home-pvc/\.ssh"'
+      - matchRegex:
+          path: data["seed-ssh.sh"]
+          pattern: "chmod 700 \"\\$SSH_DIR\""
+      - matchRegex:
+          path: data["seed-ssh.sh"]
+          pattern: 'install -m 600 /mnt/ssh-key/id_ed25519 "\$SSH_DIR/id_ed25519"'
+      - matchRegex:
+          path: data["seed-ssh.sh"]
+          pattern: 'if \[ ! -f "\$KNOWN_HOSTS" \]; then'
+      - matchRegex:
+          path: data["seed-ssh.sh"]
+          pattern: "github\\.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
+      - matchRegex:
+          path: data["seed-ssh.sh"]
+          # git+ssh tunnels through squid via connect-proxy's `connect`.
+          pattern: 'ProxyCommand connect -H \$\{SQUID_HOST\}:\$\{SQUID_PORT\} %h %p'
+
+  - it: create-ssh-key.sh is a no-op if the secret exists, and rolls back the GitHub key if the secret write fails
+    asserts:
+      - matchRegex:
+          path: data["create-ssh-key.sh"]
+          pattern: 'if kubectl -n "\$NAMESPACE" get secret "\$SECRET_NAME" >/dev/null 2>&1; then'
+      - matchRegex:
+          path: data["create-ssh-key.sh"]
+          pattern: "ssh-keygen -t ed25519"
+      - matchRegex:
+          path: data["create-ssh-key.sh"]
+          pattern: "gh api /user/keys"
+      - matchRegex:
+          path: data["create-ssh-key.sh"]
+          pattern: 'gh api -X DELETE "/user/keys/\$\{KEY_ID\}"'
 
   - it: agent-entrypoint.sh checks a login-complete marker, waits for remote-control, then exits
     asserts:

@@ -13,10 +13,30 @@ github:
   existingSecret: ""
   # -- Key within `existingSecret` that holds the token.
   existingSecretKey: "token"
-  # -- Name of the Secret the chart creates when `token` is set.
-  secretName: "cc-rc-github-token"
+  # -- Name of the Secret the chart creates when `token` is set. Defaults to
+  # "<release>-cc-rc-github-token" when left empty.
+  secretName: ""
   # -- Key used inside the chart-managed Secret.
   secretKey: "token"
+
+# -- ED25519 SSH deploy key, generated once by a pre-install/pre-upgrade hook
+# Job and added to the GitHub account that owns `github.token`/
+# `github.existingSecret`'s token (via `gh api /user/keys` - that token needs
+# the `write:public_key` scope). Every per-repo agent then clones/pushes over
+# SSH using this key instead of an HTTPS URL with an embedded token.
+sshKey:
+  # -- Set false to skip the key-generation Job (e.g. you manage `secretName`
+  # yourself out of band). Per-repo agents always clone over SSH and expect
+  # `secretName` to hold `id_ed25519`/`id_ed25519.pub` either way.
+  enabled: true
+  # -- Name of the Secret holding the generated key. The Job creates it only
+  # if it doesn't already exist, and is a no-op otherwise. Defaults to
+  # "<release>-cc-rc-ssh-key" when left empty.
+  secretName: ""
+  # -- Title shown for this key under the GitHub account's SSH keys settings.
+  keyTitle: "cc-rc"
+  # -- Container resources for the key-generation Job.
+  resources: {}
 
 # -- Git identity and global config for the `dev` user inside each agent, rendered
 # into ~/.gitconfig and ~/.gitignore_global via a ConfigMap. Commit signing is
@@ -197,9 +217,10 @@ proxy:
   #
   # When EMPTY: all web traffic is permitted (subject to denyList/defaultBlocked below),
   # on the ports listed in allowedPortsWhenOpen, plus github.com:22 for git+ssh.
-  # When NON-EMPTY: only these destinations are reachable (on ports 80/443). There is
-  # NO automatic github.com:22 carve-out in this mode — add github.com yourself if
-  # ssh access to it is needed.
+  # When NON-EMPTY: only these destinations are reachable (on ports 80/443), plus
+  # github.com:22 for git+ssh - that carve-out applies in BOTH modes (agents always
+  # clone/push over SSH, tunneled through squid; see sshKey above), unless github.com
+  # is itself in denyList.
   allowList: []
     # - github.com
     # - .githubusercontent.com
@@ -207,7 +228,7 @@ proxy:
     # - 140.82.112.0/20
 
   # -- Destinations that are always blocked, regardless of allow-list mode. Takes
-  # precedence over allowList and over the open-web-mode github.com:22 rule.
+  # precedence over allowList and over the github.com:22 git+ssh carve-out.
   denyList: []
     # - .evil.example.com
     # - 203.0.113.0/24

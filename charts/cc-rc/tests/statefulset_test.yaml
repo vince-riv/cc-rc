@@ -198,19 +198,13 @@ tests:
           path: spec.template.spec.containers[0].resources.requests.memory
           value: 8Gi
 
-  - it: wires proxy env vars and GH_TOKEN into both the clone-repo init container and the agent container
+  - it: wires proxy env vars and GH_TOKEN into the agent container (clone-repo no longer needs either - it clones over SSH)
     template: statefulset-repo.yaml
     set:
       repos:
         - org: myorg
           repo: myrepo
     asserts:
-      - documentIndex: 1
-        contains:
-          path: spec.template.spec.initContainers[1].env
-          content:
-            name: HTTPS_PROXY
-            value: http://RELEASE-NAME-cc-rc-squid.NAMESPACE.svc.cluster.local:3128
       - documentIndex: 1
         contains:
           path: spec.template.spec.containers[0].env
@@ -220,23 +214,25 @@ tests:
       - documentIndex: 1
         equal:
           path: spec.template.spec.containers[0].env[0].valueFrom.secretKeyRef.name
-          value: cc-rc-github-token
+          value: RELEASE-NAME-cc-rc-github-token
       - documentIndex: 1
         equal:
           path: spec.template.spec.containers[0].env[0].valueFrom.secretKeyRef.key
           value: token
       - documentIndex: 1
         contains:
-          path: spec.template.spec.initContainers[1].env
-          content:
-            name: NO_PROXY
-            value: localhost,127.0.0.1,.svc,.svc.cluster.local,.cluster.local,.anthropic.com
-      - documentIndex: 1
-        contains:
           path: spec.template.spec.containers[0].env
           content:
             name: NO_PROXY
             value: localhost,127.0.0.1,.svc,.svc.cluster.local,.cluster.local,.anthropic.com
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.initContainers[2].env
+          value:
+            - name: REPO_ORG
+              value: myorg
+            - name: REPO_NAME
+              value: myrepo
 
   - it: no nodeSelector/affinity by default
     template: statefulset-repo.yaml
@@ -349,7 +345,7 @@ tests:
             name: workspace
             mountPath: /workspace
 
-  - it: seeds the home PVC via the mounted seed-home script, before cloning the repo
+  - it: seeds the home PVC and ~/.ssh via the mounted scripts, before cloning the repo
     template: statefulset-repo.yaml
     set:
       repos:
@@ -379,23 +375,65 @@ tests:
       - documentIndex: 1
         equal:
           path: spec.template.spec.initContainers[1].name
-          value: clone-repo
+          value: seed-ssh
       - documentIndex: 1
         equal:
           path: spec.template.spec.initContainers[1].command
-          value: ["/bin/bash", "/opt/cc-rc/scripts/clone-repo.sh"]
+          value: ["/bin/bash", "/opt/cc-rc/scripts/seed-ssh.sh"]
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.initContainers[1].volumeMounts
+          content:
+            name: ssh-key
+            mountPath: /mnt/ssh-key
+            readOnly: true
       - documentIndex: 1
         contains:
           path: spec.template.spec.initContainers[1].env
+          content:
+            name: SQUID_HOST
+            value: RELEASE-NAME-cc-rc-squid.NAMESPACE.svc.cluster.local
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.initContainers[1].env
+          content:
+            name: SQUID_PORT
+            value: "3128"
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.initContainers[2].name
+          value: clone-repo
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.initContainers[2].command
+          value: ["/bin/bash", "/opt/cc-rc/scripts/clone-repo.sh"]
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.initContainers[2].env
           content:
             name: REPO_ORG
             value: myorg
       - documentIndex: 1
         contains:
-          path: spec.template.spec.initContainers[1].env
+          path: spec.template.spec.initContainers[2].env
           content:
             name: REPO_NAME
             value: myrepo
+
+  - it: mounts the ssh-key Secret into the container spec
+    template: statefulset-repo.yaml
+    set:
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.volumes
+          content:
+            name: ssh-key
+            secret:
+              secretName: RELEASE-NAME-cc-rc-ssh-key
 
   - it: mounts the gitconfig ConfigMap into the clone-repo init container and the agent container
     template: statefulset-repo.yaml
@@ -406,7 +444,7 @@ tests:
     asserts:
       - documentIndex: 1
         contains:
-          path: spec.template.spec.initContainers[1].volumeMounts
+          path: spec.template.spec.initContainers[2].volumeMounts
           content:
             name: gitconfig
             mountPath: /home/dev/.gitconfig

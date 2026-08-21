@@ -51,4 +51,8 @@ spec:
       ports:
         - protocol: TCP
           port: 443
+    # No separate rule needed for git+ssh: agents tunnel it through squid
+    # (already allowed above, port 3128) via ProxyCommand/CONNECT - see
+    # files/scripts/seed-ssh.sh's ~/.ssh/config and squid.conf's
+    # github_ssh/port_22 ACL.
 {{- end }}

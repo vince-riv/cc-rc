@@ -7,9 +7,13 @@ metadata:
 data:
   seed-home.sh: |
     {{- .Files.Get "files/scripts/seed-home.sh" | nindent 4 }}
+  seed-ssh.sh: |
+    {{- .Files.Get "files/scripts/seed-ssh.sh" | nindent 4 }}
   clone-repo.sh: |
     {{- .Files.Get "files/scripts/clone-repo.sh" | nindent 4 }}
   agent-entrypoint.sh: |
     {{- .Files.Get "files/scripts/agent-entrypoint.sh" | nindent 4 }}
   bash-prompt-hook.sh: |
     {{- .Files.Get "files/scripts/bash-prompt-hook.sh" | nindent 4 }}
+  create-ssh-key.sh: |
+    {{- .Files.Get "files/scripts/create-ssh-key.sh" | nindent 4 }}
