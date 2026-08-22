@@ -2,7 +2,9 @@ suite: dev gitconfig (happy path)
 templates:
   - configmap-gitconfig.yaml
 set:
-  github.token: dummy-token
+  github:
+    tokens:
+      myorg: dummy-token
   git:
     name: CI Bot
     email: ci@example.com
@@ -61,6 +63,10 @@ tests:
       - matchRegex:
           path: data[".gitignore_global"]
           pattern: "(?m)^\\*\\*/\\.claude/settings\\.local\\.json$"
+      - matchRegex:
+          path: data[".gitignore_global"]
+          # where claude creates worktrees in --spawn worktree remote-control mode
+          pattern: "(?m)^\\*\\*/\\.claude/worktrees/$"
 
   - it: honors a custom global gitignore list
     set:

@@ -7,6 +7,7 @@ version="$(curl -fsSL https://api.github.com/repos/helm/helm/releases \
     | grep -oP '"tag_name":\s*"\Kv4[^"]+' | head -1)"
 curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 \
     | DESIRED_VERSION="${version}" bash
+helm version
 
 # renovate: datasource=github-releases depName=norwoodj/helm-docs
 HELM_DOCS_VERSION=v1.14.2

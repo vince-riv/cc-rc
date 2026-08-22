@@ -1,5 +1,5 @@
-# syntax=docker/dockerfile:1
-FROM ubuntu:26.04
+# syntax=docker/dockerfile:1@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
+FROM ubuntu:26.04@sha256:2260313b31c8c011cd2eebe728008efac1b3982be73eb71348ea2648d2c0e09b
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -19,6 +19,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         golang-1.25 \
         golang-1.26 \
         openssh-client \
+        connect-proxy \
         python3 \
         python3-venv \
         python3-pip \
@@ -31,7 +32,24 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         tzdata \
         yamllint \
         screen \
-        tmux
+        tmux \
+        rsync \
+        file \
+        jq \
+        tree \
+        gnupg \
+        kubectx \
+        libssl-dev \
+        libffi-dev \
+        libyaml-dev \
+        libreadline-dev \
+        zlib1g-dev \
+        autoconf \
+        automake \
+        bison \
+        flex \
+        pkg-config \
+        cmake
 
 RUN locale-gen en_US.UTF-8 && update-locale LANG=en_US.UTF-8
 ENV LANG=en_US.UTF-8 \
@@ -60,6 +78,16 @@ RUN --mount=type=bind,source=scripts/setup-helm.sh,target=/opt/build-scripts/set
     --mount=type=tmpfs,target=/tmp \
     bash /opt/build-scripts/setup-helm.sh
 
+# kubectl, latest stable release (not in Ubuntu's apt repos at all).
+RUN --mount=type=bind,source=scripts/setup-kubectl.sh,target=/opt/build-scripts/setup-kubectl.sh \
+    --mount=type=tmpfs,target=/tmp \
+    bash /opt/build-scripts/setup-kubectl.sh
+
+# argocd CLI, latest release (also not in Ubuntu's apt repos).
+RUN --mount=type=bind,source=scripts/setup-argocd.sh,target=/opt/build-scripts/setup-argocd.sh \
+    --mount=type=tmpfs,target=/tmp \
+    bash /opt/build-scripts/setup-argocd.sh
+
 # GitHub CLI, latest release straight from GitHub (Ubuntu's apt package trails).
 RUN --mount=type=bind,source=scripts/setup-gh.sh,target=/opt/build-scripts/setup-gh.sh \
     --mount=type=tmpfs,target=/tmp \
@@ -82,6 +110,7 @@ WORKDIR /home/dev
 # config, all installed as `dev` so they land under `dev`'s home, not root's.
 RUN --mount=type=bind,source=scripts/setup-dev.sh,target=/opt/build-scripts/setup-dev.sh \
     --mount=type=bind,source=.claude/output-styles/ste100-adhd.md,target=/opt/build-scripts/ste100-adhd.md \
+    --mount=type=bind,source=charts/cc-rc/files/scripts/rescue-sessions.sh,target=/opt/build-scripts/rescue-sessions.sh \
     --mount=type=tmpfs,target=/tmp \
     bash /opt/build-scripts/setup-dev.sh
 

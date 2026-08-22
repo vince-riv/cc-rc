@@ -1,0 +1,112 @@
+{{- include "cc-rc.validateGithubAuth" . -}}
+{{- if .Values.sshKey.enabled }}
+{{- if and (not .Values.sshKey.tokenOrg) (not .Values.repos) -}}
+{{ fail "sshKey.tokenOrg must be set when repos is empty (there's no repos[0].org to default it to)." }}
+{{- end -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "cc-rc.fullname" . }}-ssh-key
+  labels:
+    {{- include "cc-rc.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-2"
+    "helm.sh/hook-delete-policy": before-hook-creation
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "cc-rc.fullname" . }}-ssh-key
+  labels:
+    {{- include "cc-rc.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-2"
+    "helm.sh/hook-delete-policy": before-hook-creation
+rules:
+  # create can't be scoped to a resourceName (the object doesn't exist yet),
+  # so it's split from get/delete below, which are scoped to just this Secret.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: [{{ include "cc-rc.sshKeySecretName" . | quote }}]
+    verbs: ["get", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "cc-rc.fullname" . }}-ssh-key
+  labels:
+    {{- include "cc-rc.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-2"
+    "helm.sh/hook-delete-policy": before-hook-creation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "cc-rc.fullname" . }}-ssh-key
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "cc-rc.fullname" . }}-ssh-key
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "cc-rc.fullname" . }}-ssh-key
+  labels:
+    {{- include "cc-rc.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ssh-key
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-1"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        {{- include "cc-rc.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: ssh-key
+    spec:
+      # No HTTP(S)_PROXY env vars: this Job talks to the Kubernetes API
+      # (in-cluster, via its ServiceAccount token) and api.github.com
+      # directly, not through squid. It's also never subject to the agent
+      # NetworkPolicy - that policy's podSelector only matches
+      # app.kubernetes.io/component: agent, so this Job's pods (component:
+      # ssh-key) keep unrestricted egress like squid's own pods do.
+      restartPolicy: Never
+      serviceAccountName: {{ include "cc-rc.fullname" . }}-ssh-key
+      containers:
+        - name: create-ssh-key
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/bin/bash", "/opt/cc-rc/scripts/create-ssh-key.sh"]
+          env:
+            - name: NAMESPACE
+              value: {{ .Release.Namespace | quote }}
+            - name: SECRET_NAME
+              value: {{ include "cc-rc.sshKeySecretName" . | quote }}
+            - name: KEY_TITLE
+              value: {{ .Values.sshKey.keyTitle | quote }}
+            - name: GH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cc-rc.githubSecretName" . }}
+                  key: {{ include "cc-rc.sshKeyTokenOrg" . }}
+          volumeMounts:
+            - name: scripts
+              mountPath: /opt/cc-rc/scripts
+          {{- with .Values.sshKey.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: scripts
+          configMap:
+            name: {{ include "cc-rc.fullname" . }}-scripts
+{{- end }}

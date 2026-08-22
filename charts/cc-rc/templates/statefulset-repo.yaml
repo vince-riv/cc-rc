@@ -1,14 +1,29 @@
 {{- include "cc-rc.validateGithubAuth" . -}}
 {{- include "cc-rc.validateGitIdentity" . -}}
+{{- include "cc-rc.validateRemoteControl" . -}}
 {{- $root := . -}}
-{{- $proxyURL := printf "http://%s.%s.svc.cluster.local:%v" (include "cc-rc.squidServiceName" .) .Release.Namespace .Values.proxy.service.port -}}
-{{- $noProxy := "localhost,127.0.0.1,.svc,.svc.cluster.local,.cluster.local" -}}
+{{- $squidHost := printf "%s.%s.svc.cluster.local" (include "cc-rc.squidServiceName" .) .Release.Namespace -}}
+{{- $proxyURL := printf "http://%s:%v" $squidHost .Values.proxy.service.port -}}
+{{- /* .anthropic.com bypasses the proxy - see NetworkPolicy egress rule
+   for 160.79.104.0/23 / 2607:6bc0::/48 that allows this direct route. */ -}}
+{{- $noProxy := "localhost,127.0.0.1,.svc,.svc.cluster.local,.cluster.local,.anthropic.com" -}}
 {{- range $repoEntry := .Values.repos }}
 {{- $slug := include "cc-rc.repoSlug" $repoEntry }}
 {{- $name := printf "%s-%s" (include "cc-rc.fullname" $root) $slug }}
-{{- $claudeSize := ($repoEntry.storage).claudeSize | default $root.Values.storage.claudeSize }}
+{{- $homeSize := ($repoEntry.storage).homeSize | default $root.Values.storage.homeSize }}
 {{- $workspaceSize := ($repoEntry.storage).workspaceSize | default $root.Values.storage.workspaceSize }}
 {{- $resources := mergeOverwrite (deepCopy $root.Values.resources) ($repoEntry.resources | default dict) }}
+{{- $rc := $repoEntry.remoteControl | default dict }}
+{{- $rcPermissionMode := $rc.permissionMode | default $root.Values.remoteControl.permissionMode }}
+{{- $rcSpawn := $rc.spawn | default $root.Values.remoteControl.spawn }}
+{{- $rcCapacity := $rc.capacity | default $root.Values.remoteControl.capacity }}
+{{- $rcUnhealthyTimeout := $rc.unhealthyTimeoutSeconds | default $root.Values.remoteControl.unhealthyTimeoutSeconds }}
+{{- $rcFirstBootTimeout := $rc.firstBootTimeoutSeconds | default $root.Values.remoteControl.firstBootTimeoutSeconds }}
+{{- $rcWorktreeMaxAgeDays := $rc.worktreeMaxAgeDays | default $root.Values.remoteControl.worktreeMaxAgeDays }}
+{{- $rcName := $rc.name | default "" }}
+{{- $nodeSelector := $repoEntry.nodeSelector | default $root.Values.nodeSelector }}
+{{- $affinity := $repoEntry.affinity | default $root.Values.affinity }}
+{{- $tolerations := $repoEntry.tolerations | default $root.Values.tolerations }}
 ---
 apiVersion: v1
 kind: Service
@@ -39,6 +54,7 @@ metadata:
 spec:
   serviceName: {{ $name }}
   replicas: 1
+  revisionHistoryLimit: {{ $root.Values.revisionHistoryLimit }}
   selector:
     matchLabels:
       {{- include "cc-rc.selectorLabels" $root | nindent 6 }}
@@ -47,6 +63,8 @@ spec:
       cc-rc.io/repo: {{ $repoEntry.repo | quote }}
   template:
     metadata:
+      annotations:
+        checksum/scripts: {{ include (print $.Template.BasePath "/configmap-scripts.yaml") $root | sha256sum }}
       labels:
         {{- include "cc-rc.labels" $root | nindent 8 }}
         app.kubernetes.io/component: agent
@@ -54,41 +72,68 @@ spec:
         cc-rc.io/repo: {{ $repoEntry.repo | quote }}
     spec:
       automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ $root.Values.terminationGracePeriodSeconds }}
       securityContext:
         fsGroup: {{ $root.Values.podFsGroup }}
+      {{- with $nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       initContainers:
+        - name: seed-home
+          # Mounted at a path other than /home/dev, so the image's baked-in
+          # home dir (e.g. ~/.claude/settings.json) stays visible here and
+          # can be copied onto the home PVC - unlike the agent container,
+          # where the PVC is mounted directly at /home/dev and shadows it.
+          image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          command: ["/bin/bash", "/opt/cc-rc/scripts/seed-home.sh"]
+          volumeMounts:
+            - name: home
+              mountPath: /mnt/home-pvc
+            - name: scripts
+              mountPath: /opt/cc-rc/scripts
+        - name: seed-ssh
+          # Populates ~/.ssh on the home PVC (id_ed25519/.pub from the
+          # sshKey Secret, plus known_hosts if missing) before clone-repo
+          # needs it to git clone over SSH. Same "mount elsewhere, write onto
+          # the PVC" pattern as seed-home, and for the same reason.
+          image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          command: ["/bin/bash", "/opt/cc-rc/scripts/seed-ssh.sh"]
+          env:
+            - name: SQUID_HOST
+              value: {{ $squidHost | quote }}
+            - name: SQUID_PORT
+              value: {{ $root.Values.proxy.service.port | quote }}
+          volumeMounts:
+            - name: home
+              mountPath: /mnt/home-pvc
+            - name: ssh-key
+              mountPath: /mnt/ssh-key
+              readOnly: true
+            - name: scripts
+              mountPath: /opt/cc-rc/scripts
         - name: clone-repo
           image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
           imagePullPolicy: {{ $root.Values.image.pullPolicy }}
-          command: ["/bin/bash", "-c"]
-          args:
-            - |
-              set -euo pipefail
-              DEST="/workspace/repo"
-              if [ -d "$DEST/.git" ]; then
-                echo "Already cloned at $DEST, skipping."
-              else
-                git clone "https://x-access-token:${GH_TOKEN}@github.com/{{ $repoEntry.org }}/{{ $repoEntry.repo }}.git" "$DEST"
-              fi
+          command: ["/bin/bash", "/opt/cc-rc/scripts/clone-repo.sh"]
           env:
-            - name: GH_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "cc-rc.githubSecretName" $root }}
-                  key: {{ include "cc-rc.githubSecretKey" $root }}
-            - name: HTTP_PROXY
-              value: {{ $proxyURL | quote }}
-            - name: HTTPS_PROXY
-              value: {{ $proxyURL | quote }}
-            - name: http_proxy
-              value: {{ $proxyURL | quote }}
-            - name: https_proxy
-              value: {{ $proxyURL | quote }}
-            - name: NO_PROXY
-              value: {{ $noProxy | quote }}
-            - name: no_proxy
-              value: {{ $noProxy | quote }}
+            - name: REPO_ORG
+              value: {{ $repoEntry.org | quote }}
+            - name: REPO_NAME
+              value: {{ $repoEntry.repo | quote }}
           volumeMounts:
+            - name: home
+              mountPath: /home/dev
             - name: workspace
               mountPath: /workspace
             - name: gitconfig
@@ -97,17 +142,19 @@ spec:
             - name: gitconfig
               mountPath: /home/dev/.gitignore_global
               subPath: .gitignore_global
+            - name: scripts
+              mountPath: /opt/cc-rc/scripts
       containers:
         - name: agent
           image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
           imagePullPolicy: {{ $root.Values.image.pullPolicy }}
-          command: ["/bin/bash", "-c", "sleep infinity"]
+          command: ["/bin/bash", "/opt/cc-rc/scripts/agent-entrypoint.sh"]
           env:
             - name: GH_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ include "cc-rc.githubSecretName" $root }}
-                  key: {{ include "cc-rc.githubSecretKey" $root }}
+                  key: {{ $repoEntry.org }}
             - name: HTTP_PROXY
               value: {{ $proxyURL | quote }}
             - name: HTTPS_PROXY
@@ -120,9 +167,43 @@ spec:
               value: {{ $noProxy | quote }}
             - name: no_proxy
               value: {{ $noProxy | quote }}
+            - name: RC_NAME
+              value: {{ $rcName | quote }}
+            - name: RC_PERMISSION_MODE
+              value: {{ $rcPermissionMode | quote }}
+            - name: RC_SPAWN
+              value: {{ $rcSpawn | quote }}
+            - name: RC_CAPACITY
+              value: {{ $rcCapacity | quote }}
+            - name: RC_UNHEALTHY_TIMEOUT
+              value: {{ $rcUnhealthyTimeout | quote }}
+            - name: RC_FIRST_BOOT_TIMEOUT
+              value: {{ $rcFirstBootTimeout | quote }}
+            - name: RC_WORKTREE_MAX_AGE_DAYS
+              value: {{ $rcWorktreeMaxAgeDays | quote }}
+            - name: RC_SHUTDOWN_WAIT
+              # A few seconds shy of terminationGracePeriodSeconds, so the
+              # entrypoint's own bounded wait for claude to exit still
+              # finishes - and logs why - before kubelet's SIGKILL would hit.
+              value: {{ sub $root.Values.terminationGracePeriodSeconds 5 | quote }}
+            # Fires on every prompt in an interactive bash shell in this
+            # container (the claude-login screen session, and any ad-hoc
+            # `kubectl exec -it ... -- bash`) - not just the login screen
+            # session, so instructions show up wherever someone looks.
+            - name: PROMPT_COMMAND
+              value: "source /opt/cc-rc/scripts/bash-prompt-hook.sh"
+          # No livenessProbe: it would kill the container on kubelet's own
+          # schedule, bypassing RC_UNHEALTHY_TIMEOUT - the script manages its
+          # own exit-on-unhealthy so that timeout (and the debugging window
+          # it gives you) is actually honored.
+          readinessProbe:
+            exec:
+              command: ["pgrep", "-f", "claude remote-control"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
           volumeMounts:
-            - name: claude-home
-              mountPath: /home/dev/.claude
+            - name: home
+              mountPath: /home/dev
             - name: workspace
               mountPath: /workspace
             - name: gitconfig
@@ -131,6 +212,8 @@ spec:
             - name: gitconfig
               mountPath: /home/dev/.gitignore_global
               subPath: .gitignore_global
+            - name: scripts
+              mountPath: /opt/cc-rc/scripts
           {{- with $resources }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -139,9 +222,17 @@ spec:
         - name: gitconfig
           configMap:
             name: {{ include "cc-rc.fullname" $root }}-gitconfig
+        - name: ssh-key
+          secret:
+            secretName: {{ include "cc-rc.sshKeySecretName" $root }}
+        - name: scripts
+          configMap:
+            name: {{ include "cc-rc.fullname" $root }}-scripts
   volumeClaimTemplates:
-    - metadata:
-        name: claude-home
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: home
       spec:
         accessModes: ["ReadWriteOnce"]
         {{- if $root.Values.storage.storageClassName }}
@@ -149,8 +240,10 @@ spec:
         {{- end }}
         resources:
           requests:
-            storage: {{ $claudeSize }}
-    - metadata:
+            storage: {{ $homeSize }}
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
         name: workspace
       spec:
         accessModes: ["ReadWriteOnce"]

@@ -1,13 +1,22 @@
 suite: per-repo agent StatefulSet (happy path)
 templates:
   - statefulset-repo.yaml
+  - configmap-scripts.yaml
 set:
-  github.token: dummy-token
+  # Covers every org used across this file's individual tests' repos[]
+  # overrides (github.tokens must have an entry for each).
+  github:
+    tokens:
+      MyOrg: dummy-token
+      myorg: dummy-token
+      alpha: dummy-token
+      beta: dummy-token
   git:
     name: CI Bot
     email: ci@example.com
 tests:
   - it: renders a headless Service and a StatefulSet named after the org/repo slug
+    template: statefulset-repo.yaml
     set:
       repos:
         - org: MyOrg
@@ -48,7 +57,33 @@ tests:
           path: metadata.labels["cc-rc.io/repo"]
           value: My_Repo!
 
+  - it: defaults revisionHistoryLimit to 5
+    template: statefulset-repo.yaml
+    set:
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - documentIndex: 1
+        equal:
+          path: spec.revisionHistoryLimit
+          value: 5
+
+  - it: revisionHistoryLimit overrides the default for all per-repo StatefulSets
+    template: statefulset-repo.yaml
+    set:
+      revisionHistoryLimit: 2
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - documentIndex: 1
+        equal:
+          path: spec.revisionHistoryLimit
+          value: 2
+
   - it: uses default PVC sizes when a repo doesn't override storage
+    template: statefulset-repo.yaml
     set:
       repos:
         - org: myorg
@@ -57,11 +92,11 @@ tests:
       - documentIndex: 1
         equal:
           path: spec.volumeClaimTemplates[0].metadata.name
-          value: claude-home
+          value: home
       - documentIndex: 1
         equal:
           path: spec.volumeClaimTemplates[0].spec.resources.requests.storage
-          value: 500Mi
+          value: 5Gi
       - documentIndex: 1
         equal:
           path: spec.volumeClaimTemplates[1].metadata.name
@@ -72,12 +107,13 @@ tests:
           value: 5Gi
 
   - it: a repo can override PVC sizes
+    template: statefulset-repo.yaml
     set:
       repos:
         - org: myorg
           repo: myrepo
           storage:
-            claudeSize: 1Gi
+            homeSize: 1Gi
             workspaceSize: 20Gi
     asserts:
       - documentIndex: 1
@@ -90,6 +126,7 @@ tests:
           value: 20Gi
 
   - it: applies the default resources to the agent container when no repo override is set
+    template: statefulset-repo.yaml
     set:
       resources:
         requests:
@@ -116,6 +153,7 @@ tests:
           value: "1"
 
   - it: a repo can override just cpu, keeping the default memory
+    template: statefulset-repo.yaml
     set:
       resources:
         requests:
@@ -138,6 +176,7 @@ tests:
           value: 512Mi
 
   - it: a repo can fully override resources independently of the chart default
+    template: statefulset-repo.yaml
     set:
       resources:
         requests:
@@ -166,18 +205,13 @@ tests:
           path: spec.template.spec.containers[0].resources.requests.memory
           value: 8Gi
 
-  - it: wires proxy env vars and GH_TOKEN into both the init container and the agent container
+  - it: wires proxy env vars and GH_TOKEN into the agent container (clone-repo no longer needs either - it clones over SSH)
+    template: statefulset-repo.yaml
     set:
       repos:
         - org: myorg
           repo: myrepo
     asserts:
-      - documentIndex: 1
-        contains:
-          path: spec.template.spec.initContainers[0].env
-          content:
-            name: HTTPS_PROXY
-            value: http://RELEASE-NAME-cc-rc-squid.NAMESPACE.svc.cluster.local:3128
       - documentIndex: 1
         contains:
           path: spec.template.spec.containers[0].env
@@ -187,13 +221,119 @@ tests:
       - documentIndex: 1
         equal:
           path: spec.template.spec.containers[0].env[0].valueFrom.secretKeyRef.name
-          value: cc-rc-github-token
+          value: RELEASE-NAME-cc-rc-github-tokens
       - documentIndex: 1
         equal:
           path: spec.template.spec.containers[0].env[0].valueFrom.secretKeyRef.key
-          value: token
+          value: myorg
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: NO_PROXY
+            value: localhost,127.0.0.1,.svc,.svc.cluster.local,.cluster.local,.anthropic.com
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.initContainers[2].env
+          value:
+            - name: REPO_ORG
+              value: myorg
+            - name: REPO_NAME
+              value: myrepo
 
-  - it: mounts the claude-home and workspace PVCs at the expected paths
+  - it: no nodeSelector/affinity by default
+    template: statefulset-repo.yaml
+    set:
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - documentIndex: 1
+        notExists:
+          path: spec.template.spec.nodeSelector
+      - documentIndex: 1
+        notExists:
+          path: spec.template.spec.affinity
+
+  - it: applies the top-level nodeSelector/affinity defaults to every repo's StatefulSet
+    template: statefulset-repo.yaml
+    set:
+      nodeSelector:
+        disktype: ssd
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/arch
+                    operator: In
+                    values: ["amd64"]
+      repos:
+        - org: alpha
+          repo: one
+        - org: beta
+          repo: two
+    asserts:
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.nodeSelector.disktype
+          value: ssd
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].key
+          value: kubernetes.io/arch
+      - documentIndex: 3
+        equal:
+          path: spec.template.spec.nodeSelector.disktype
+          value: ssd
+
+  - it: a repo's nodeSelector/affinity/tolerations fully replaces the top-level default, not merges with it
+    template: statefulset-repo.yaml
+    set:
+      nodeSelector:
+        disktype: ssd
+      tolerations:
+        - key: default-taint
+          operator: Exists
+      repos:
+        - org: myorg
+          repo: myrepo
+          nodeSelector:
+            gpu: "true"
+          affinity:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - key: kubernetes.io/arch
+                        operator: In
+                        values: ["arm64"]
+          tolerations:
+            - key: gpu
+              operator: Exists
+              effect: NoSchedule
+    asserts:
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.nodeSelector.gpu
+          value: "true"
+      - documentIndex: 1
+        notExists:
+          path: spec.template.spec.nodeSelector.disktype
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].values[0]
+          value: arm64
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.tolerations
+          value:
+            - key: gpu
+              operator: Exists
+              effect: NoSchedule
+
+  - it: mounts the home and workspace PVCs at the expected paths
+    template: statefulset-repo.yaml
     set:
       repos:
         - org: myorg
@@ -203,8 +343,8 @@ tests:
         contains:
           path: spec.template.spec.containers[0].volumeMounts
           content:
-            name: claude-home
-            mountPath: /home/dev/.claude
+            name: home
+            mountPath: /home/dev
       - documentIndex: 1
         contains:
           path: spec.template.spec.containers[0].volumeMounts
@@ -212,7 +352,83 @@ tests:
             name: workspace
             mountPath: /workspace
 
-  - it: mounts the gitconfig ConfigMap into both containers
+  - it: seeds the home PVC and ~/.ssh via the mounted scripts, before cloning the repo
+    template: statefulset-repo.yaml
+    set:
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.initContainers[0].name
+          value: seed-home
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.initContainers[0].command
+          value: ["/bin/bash", "/opt/cc-rc/scripts/seed-home.sh"]
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.initContainers[0].volumeMounts
+          content:
+            name: home
+            mountPath: /mnt/home-pvc
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.initContainers[0].volumeMounts
+          content:
+            name: scripts
+            mountPath: /opt/cc-rc/scripts
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.initContainers[1].name
+          value: seed-ssh
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.initContainers[1].command
+          value: ["/bin/bash", "/opt/cc-rc/scripts/seed-ssh.sh"]
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.initContainers[1].volumeMounts
+          content:
+            name: ssh-key
+            mountPath: /mnt/ssh-key
+            readOnly: true
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.initContainers[1].env
+          content:
+            name: SQUID_HOST
+            value: RELEASE-NAME-cc-rc-squid.NAMESPACE.svc.cluster.local
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.initContainers[1].env
+          content:
+            name: SQUID_PORT
+            value: "3128"
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.initContainers[2].name
+          value: clone-repo
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.initContainers[2].command
+          value: ["/bin/bash", "/opt/cc-rc/scripts/clone-repo.sh"]
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.initContainers[2].env
+          content:
+            name: REPO_ORG
+            value: myorg
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.initContainers[2].env
+          content:
+            name: REPO_NAME
+            value: myrepo
+
+  - it: mounts the ssh-key Secret into the container spec
+    template: statefulset-repo.yaml
     set:
       repos:
         - org: myorg
@@ -220,7 +436,22 @@ tests:
     asserts:
       - documentIndex: 1
         contains:
-          path: spec.template.spec.initContainers[0].volumeMounts
+          path: spec.template.spec.volumes
+          content:
+            name: ssh-key
+            secret:
+              secretName: RELEASE-NAME-cc-rc-ssh-key
+
+  - it: mounts the gitconfig ConfigMap into the clone-repo init container and the agent container
+    template: statefulset-repo.yaml
+    set:
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.initContainers[2].volumeMounts
           content:
             name: gitconfig
             mountPath: /home/dev/.gitconfig
@@ -248,6 +479,7 @@ tests:
               name: RELEASE-NAME-cc-rc-gitconfig
 
   - it: renders one StatefulSet per repo entry
+    template: statefulset-repo.yaml
     set:
       repos:
         - org: alpha
@@ -264,12 +496,12 @@ tests:
           path: metadata.name
           value: RELEASE-NAME-cc-rc-beta-two
 
-  - it: uses an existing GH_TOKEN secret when github.existingSecret is set
+  - it: uses an existing GH_TOKEN secret when github.existingSecret is set, keyed by org
+    template: statefulset-repo.yaml
     set:
       github:
-        token: ""
+        tokens: null
         existingSecret: my-existing-secret
-        existingSecretKey: gh-pat
       repos:
         - org: myorg
           repo: myrepo
@@ -281,4 +513,222 @@ tests:
       - documentIndex: 1
         equal:
           path: spec.template.spec.containers[0].env[0].valueFrom.secretKeyRef.key
-          value: gh-pat
+          value: myorg
+
+  - it: has a readiness probe that checks for a running claude remote-control process, and no livenessProbe
+    template: statefulset-repo.yaml
+    set:
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.containers[0].readinessProbe.exec.command
+          value: ["pgrep", "-f", "claude remote-control"]
+      - documentIndex: 1
+        # Deliberately no livenessProbe: it would kill the container on
+        # kubelet's own schedule, bypassing RC_UNHEALTHY_TIMEOUT - the
+        # script manages its own exit-on-unhealthy instead.
+        notExists:
+          path: spec.template.spec.containers[0].livenessProbe
+
+  - it: the agent container runs the mounted entrypoint script, with the scripts volume mounted
+    template: statefulset-repo.yaml
+    set:
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.containers[0].command
+          value: ["/bin/bash", "/opt/cc-rc/scripts/agent-entrypoint.sh"]
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: scripts
+            mountPath: /opt/cc-rc/scripts
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.volumes
+          content:
+            name: scripts
+            configMap:
+              name: RELEASE-NAME-cc-rc-scripts
+
+  - it: passes the default remote-control settings as env vars, with no name override
+    template: statefulset-repo.yaml
+    set:
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RC_NAME
+            value: ""
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RC_PERMISSION_MODE
+            value: "bypassPermissions"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RC_SPAWN
+            value: "worktree"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RC_CAPACITY
+            value: "8"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RC_UNHEALTHY_TIMEOUT
+            value: "45"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RC_FIRST_BOOT_TIMEOUT
+            value: "900"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RC_WORKTREE_MAX_AGE_DAYS
+            value: "10"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RC_SHUTDOWN_WAIT
+            # terminationGracePeriodSeconds (60, chart default) minus a 5s buffer.
+            value: "55"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PROMPT_COMMAND
+            value: "source /opt/cc-rc/scripts/bash-prompt-hook.sh"
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 60
+
+  - it: a repo can override remote-control name/permissionMode/spawn/capacity/unhealthyTimeoutSeconds/firstBootTimeoutSeconds/worktreeMaxAgeDays independently of the chart default
+    template: statefulset-repo.yaml
+    set:
+      remoteControl:
+        permissionMode: plan
+        spawn: session
+        capacity: 4
+      terminationGracePeriodSeconds: 120
+      repos:
+        - org: myorg
+          repo: myrepo
+          remoteControl:
+            name: custom-name
+            capacity: 12
+            unhealthyTimeoutSeconds: 300
+            firstBootTimeoutSeconds: 1800
+            worktreeMaxAgeDays: 3
+    asserts:
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RC_NAME
+            value: "custom-name"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RC_PERMISSION_MODE
+            value: "plan"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RC_SPAWN
+            value: "session"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RC_CAPACITY
+            value: "12"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RC_UNHEALTHY_TIMEOUT
+            value: "300"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RC_FIRST_BOOT_TIMEOUT
+            value: "1800"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RC_WORKTREE_MAX_AGE_DAYS
+            value: "3"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RC_SHUTDOWN_WAIT
+            # terminationGracePeriodSeconds (120, overridden above) minus a 5s buffer.
+            value: "115"
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 120
+
+  - it: fails when remoteControl.permissionMode is not a recognized value
+    template: statefulset-repo.yaml
+    set:
+      remoteControl:
+        permissionMode: not-a-real-mode
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - failedTemplate:
+          errorMessageRegex: "remoteControl.permissionMode must be one of"
+
+  - it: fails when remoteControl.spawn is not a recognized value
+    template: statefulset-repo.yaml
+    set:
+      remoteControl:
+        spawn: not-a-real-mode
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - failedTemplate:
+          errorMessageRegex: "remoteControl.spawn must be one of"
+
+  - it: fails when a repo's remoteControl.permissionMode override is not a recognized value
+    template: statefulset-repo.yaml
+    set:
+      repos:
+        - org: myorg
+          repo: myrepo
+          remoteControl:
+            permissionMode: not-a-real-mode
+    asserts:
+      - failedTemplate:
+          errorMessageRegex: "repos\\[\\].remoteControl.permissionMode must be one of"

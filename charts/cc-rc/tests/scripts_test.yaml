@@ -1,0 +1,197 @@
+suite: mounted scripts ConfigMap (happy path)
+templates:
+  - configmap-scripts.yaml
+set:
+  github:
+    tokens:
+      myorg: dummy-token
+  git:
+    name: CI Bot
+    email: ci@example.com
+  repos:
+    - org: myorg
+      repo: myrepo
+tests:
+  - it: seed-home.sh overwrites ~/.claude/ from the image but resets everywhere else, excluding ~/.cc-rc/ and ~/.claude.json
+    asserts:
+      - isKind:
+          of: ConfigMap
+      - matchRegex:
+          path: data["seed-home.sh"]
+          pattern: "rsync -a --no-times --no-owner --no-group --no-perms --ignore-times"
+      - matchRegex:
+          path: data["seed-home.sh"]
+          pattern: "/home/dev/\\.claude/\\. /mnt/home-pvc/\\.claude/"
+      - matchRegex:
+          path: data["seed-home.sh"]
+          pattern: "rsync -a --delete --no-times --no-owner --no-group --no-perms"
+      - matchRegex:
+          path: data["seed-home.sh"]
+          # ~/.claude.json (claude's own account/session state) is a
+          # top-level file, sibling to the ~/.claude/ directory, not
+          # inside it - must be excluded separately or it gets wiped
+          # every boot since the image never ships it.
+          pattern: "--exclude=\\.claude --exclude=\\.cc-rc --exclude=\\.claude\\.json"
+
+  - it: clone-repo.sh clones via REPO_ORG/REPO_NAME env vars, idempotently
+    asserts:
+      - matchRegex:
+          path: data["clone-repo.sh"]
+          pattern: 'DEST="/workspace/repo"'
+      - matchRegex:
+          path: data["clone-repo.sh"]
+          pattern: 'if \[ -d "\$DEST/\.git" \]'
+      - matchRegex:
+          path: data["clone-repo.sh"]
+          pattern: "git@github\\.com:\\$\\{REPO_ORG\\}/\\$\\{REPO_NAME\\}\\.git"
+
+  - it: seed-ssh.sh copies the SSH key onto the home PVC and seeds known_hosts only if missing
+    asserts:
+      - matchRegex:
+          path: data["seed-ssh.sh"]
+          pattern: 'SSH_DIR="/mnt/home-pvc/\.ssh"'
+      - matchRegex:
+          path: data["seed-ssh.sh"]
+          pattern: "chmod 700 \"\\$SSH_DIR\""
+      - matchRegex:
+          path: data["seed-ssh.sh"]
+          pattern: 'install -m 600 /mnt/ssh-key/id_ed25519 "\$SSH_DIR/id_ed25519"'
+      - matchRegex:
+          path: data["seed-ssh.sh"]
+          pattern: 'if \[ ! -f "\$KNOWN_HOSTS" \]; then'
+      - matchRegex:
+          path: data["seed-ssh.sh"]
+          pattern: "github\\.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
+      - matchRegex:
+          path: data["seed-ssh.sh"]
+          # git+ssh tunnels through squid via connect-proxy's `connect`.
+          pattern: 'ProxyCommand connect -H \$\{SQUID_HOST\}:\$\{SQUID_PORT\} %h %p'
+
+  - it: create-ssh-key.sh is a no-op if the secret exists, and rolls back the GitHub key if the secret write fails
+    asserts:
+      - matchRegex:
+          path: data["create-ssh-key.sh"]
+          pattern: 'if kubectl -n "\$NAMESPACE" get secret "\$SECRET_NAME" >/dev/null 2>&1; then'
+      - matchRegex:
+          path: data["create-ssh-key.sh"]
+          pattern: "ssh-keygen -t ed25519"
+      - matchRegex:
+          path: data["create-ssh-key.sh"]
+          pattern: "gh api /user/keys"
+      - matchRegex:
+          path: data["create-ssh-key.sh"]
+          pattern: 'gh api -X DELETE "/user/keys/\$\{KEY_ID\}"'
+
+  - it: agent-entrypoint.sh checks a login-complete marker, waits for remote-control, then exits
+    asserts:
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          pattern: "MARKER=\"\\$MARKER_DIR/login-complete\""
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          # pgrep -f matches this script's own process too (it echoes
+          # "claude remote-control" in its own instructions) - must exclude
+          # $$ or the very first boot always false-positives immediately.
+          pattern: "pgrep -f \"claude remote-control\" \\| grep -qv \"\\^\\$\\$\\\\\\$\""
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          # -L -Logfile captures the screen session's output (otherwise
+          # invisible via kubectl logs/stern), tailed into our own stdout.
+          # An interactive shell (not claude directly), so PROMPT_COMMAND's
+          # instructions/cc-rc-finish-login are available and claude exiting
+          # doesn't tear down the whole session.
+          pattern: "screen -L -Logfile \"\\$LOGIN_LOG\" -dmS claude-login bash -lic 'cd /workspace/repo && exec bash -li'"
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          pattern: 'tail -F "\$LOGIN_LOG" &'
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          # First-boot completion is signaled only via the marker file
+          # (written by cc-rc-finish-login, see bash-prompt-hook.sh) -
+          # deliberately NOT auto-detected from a running claude
+          # remote-control process, since its first real run can take a
+          # few minutes to configure.
+          pattern: 'while \[ ! -f "\$MARKER" \]; do'
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          # bounded wait: gives up and lets the pod restart/retry rather
+          # than waiting forever for a human who may never show up.
+          pattern: '-ge "\$RC_FIRST_BOOT_TIMEOUT" \]; then'
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          # --continue was tried and dropped - claude remote-control
+          # rejects it combined with --spawn/--capacity, and it doesn't
+          # reattach worktree sessions anyway. Plain invocation only.
+          pattern: "screen -L -Logfile \"\\$RC_LOG\" -dmS remote-control bash -lic \"cd /workspace/repo && claude remote-control --name \\$\\{NAME\\} --permission-mode \\$\\{RC_PERMISSION_MODE\\} --spawn \\$\\{RC_SPAWN\\} --capacity \\$\\{RC_CAPACITY\\}\""
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          pattern: 'tail -F "\$RC_LOG" &'
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          # timeout is configurable (RC_UNHEALTHY_TIMEOUT env var), not
+          # hardcoded, so it can be raised to give more time to
+          # `kubectl exec` in and debug a startup failure before the
+          # container exits/restarts.
+          pattern: '-ge "\$RC_UNHEALTHY_TIMEOUT" \]; then'
+
+  - it: agent-entrypoint.sh forwards SIGINT to claude remote-control on SIGTERM and waits before exiting
+    asserts:
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          pattern: "trap graceful_shutdown TERM"
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          pattern: 'kill -INT "\$pid" 2>/dev/null \|\| true'
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          pattern: '-lt "\$RC_SHUTDOWN_WAIT" \]; do'
+
+  - it: agent-entrypoint.sh prunes worktrees not tracked by any session record, or stale past RC_WORKTREE_MAX_AGE_DAYS, before starting remote-control
+    asserts:
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          pattern: "prune_stale_worktrees\\(\\) \\{"
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          pattern: 'max_age_seconds=\$\(\( RC_WORKTREE_MAX_AGE_DAYS \* 86400 \)\)'
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          # double --force: single --force only overrides an unclean
+          # worktree, not a locked one.
+          pattern: "git worktree remove --force --force \"\\$wt\""
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          # a worktree with no matching ~/.claude/sessions/ entry is
+          # removed unconditionally, no age check.
+          pattern: 'if \[ -z "\$session_file" \]; then'
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          # a matched-but-stale worktree also has its session bookkeeping
+          # files cleaned up, not just the worktree checkout.
+          pattern: 'rm -f "\$session_file" "/home/dev/\.claude/sessions/\$\{pid\}\."\*\.key'
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          # an unrecognized session/ccr-tip JSON shape fails pod startup
+          # outright rather than risking a mis-prune.
+          pattern: 'FATAL: \$f does not match the expected session JSON shape'
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          pattern: 'FATAL: \$tip_file does not match the expected ccr-tip JSON shape'
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          # prune_stale_worktrees runs before remote-control starts, not after.
+          pattern: "prune_stale_worktrees\\n\\n: > \"\\$RC_LOG\""
+
+  - it: bash-prompt-hook.sh prints login instructions once and defines cc-rc-finish-login
+    asserts:
+      - matchRegex:
+          path: data["bash-prompt-hook.sh"]
+          pattern: "cc-rc-finish-login\\(\\) \\{"
+      - matchRegex:
+          path: data["bash-prompt-hook.sh"]
+          pattern: "touch /home/dev/\\.cc-rc/login-complete"
+      - matchRegex:
+          path: data["bash-prompt-hook.sh"]
+          # only prints once per shell session (guarded by
+          # CC_RC_INSTRUCTIONS_SHOWN), and only while login is incomplete.
+          pattern: '\[ -z "\$\{CC_RC_INSTRUCTIONS_SHOWN:-\}" \] && \[ ! -f /home/dev/\.cc-rc/login-complete \]'

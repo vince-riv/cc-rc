@@ -28,6 +28,16 @@ data:
     http_port {{ .Values.proxy.service.port }}
     visible_hostname squid
     coredump_dir /var/spool/squid
+    # Default access_log/cache_log write to files inside the container,
+    # invisible to `kubectl logs`/stern - redirect both to stdout instead.
+    #
+    # kubelet's tcpSocket probes log as NONE_NONE/000
+    # error:transaction-end-before-headers. Verified against the real 7.2
+    # binary this can't be filtered by an access_log ACL - no ACL type gets
+    # enough context to match a zero-data transaction, so it always falls
+    # through and logs anyway. Don't add one back without testing first.
+    access_log stdio:/dev/stdout squid
+    cache_log /dev/stdout
     refresh_pattern ^ftp:           1440    20%     10080
     refresh_pattern ^gopher:        1440    0%      1440
     refresh_pattern -i (/cgi-bin/|\?) 0     0%      0
@@ -53,10 +63,11 @@ data:
     #   1. protocol/port sanity
     #   2. baked-in defaultBlocked destinations — always denied
     #   3. user-supplied denyList — always denied
-    #   4. allow-list-or-open-web logic, then deny everything else
-    #      (github.com:22 is only auto-allowed in open-web mode; in strict
-    #      allow-list mode it is NOT a bypass — add github.com to
-    #      proxy.allowList yourself if you need it there)
+    #   4. github.com:22 (git+ssh, see files/scripts/seed-ssh.sh's
+    #      ~/.ssh/config - agents tunnel git+ssh through squid via
+    #      ProxyCommand/CONNECT) — always allowed, in both modes, unless
+    #      denyList already denied it above
+    #   5. allow-list-or-open-web logic, then deny everything else
     #
 
     # -- 1. protocol/port sanity --
@@ -79,11 +90,14 @@ data:
     http_access deny user_deny_cidrs
     {{- end }}
 
-    # -- 4. allow-list-or-open-web logic --
+    # -- 4. github.com:22 (git+ssh), always allowed --
+    acl github_ssh dstdomain github.com
+    acl port_22 port 22
+    http_access allow github_ssh port_22
+
+    # -- 5. allow-list-or-open-web logic --
     {{- if .Values.proxy.allowList }}
     # Strict allow-list mode: only these destinations, on ports 80/443.
-    # No github.com:22 carve-out here — add github.com to proxy.allowList
-    # yourself if ssh access to it is needed under strict mode.
     acl allowed_ports port 80
     acl allowed_ports port 443
     {{- if $allowDomains }}
@@ -97,10 +111,7 @@ data:
     http_access deny all
     {{- else }}
     # Open-web mode: allow everything not already denied, on the configured
-    # ports, plus github.com:22 for git+ssh.
-    acl github_ssh dstdomain github.com
-    acl port_22 port 22
-    http_access allow github_ssh port_22
+    # ports.
     acl open_ports port {{ .Values.proxy.allowedPortsWhenOpen | join " " }}
     http_access allow open_ports
     http_access deny all
