@@ -7,6 +7,7 @@ metadata:
     app.kubernetes.io/component: proxy
 spec:
   replicas: {{ .Values.proxy.replicaCount }}
+  revisionHistoryLimit: {{ .Values.proxy.revisionHistoryLimit }}
   selector:
     matchLabels:
       {{- include "cc-rc.selectorLabels" . | nindent 6 }}
@@ -20,6 +21,21 @@ spec:
         app.kubernetes.io/component: proxy
     spec:
       automountServiceAccountToken: false
+      {{- with .Values.proxy.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.proxy.affinity }}
+      affinity:
+        {{- toYaml .Values.proxy.affinity | nindent 8 }}
+      {{- else if gt (int .Values.proxy.replicaCount) 1 }}
+      affinity:
+        {{- include "cc-rc.squidAntiAffinity" . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.proxy.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: squid
           image: "{{ .Values.proxy.image.repository }}:{{ .Values.proxy.image.tag }}"
@@ -31,18 +47,53 @@ spec:
           # /var/lib/pebble/default/layers/*-rockcraft-squid.yaml in the
           # image). Passing args here would go to `pebble enter`, which
           # doesn't understand squid's flags and crashloops.
+          env:
+            # squid.conf sends access_log/cache_log to /dev/stdout, but
+            # Pebble (this image's PID 1) only relays service output to
+            # its own stdout - which is what `kubectl logs`/stern show -
+            # when running verbose; otherwise it's only visible via
+            # `pebble logs squid` inside the container.
+            - name: PEBBLE_VERBOSE
+              value: "1"
           ports:
             - name: squid
               containerPort: {{ .Values.proxy.service.port }}
               protocol: TCP
-          readinessProbe:
+          startupProbe:
             tcpSocket:
               port: squid
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            failureThreshold: 12
+          readinessProbe:
+            {{- if .Values.proxy.probes.quiet }}
+            # tcpSocket would connect then disconnect without sending a
+            # request on every check, which squid logs as NONE_NONE/000
+            # error:transaction-end-before-headers - unfilterable in
+            # squid.conf (see configmap-squid.yaml). Check for a LISTEN
+            # socket directly instead, so squid never sees the probe.
+            exec:
+              command:
+                - sh
+                - -c
+                - awk -v p={{ printf "%04X" (int .Values.proxy.service.port) }} 'BEGIN{ok=0} FNR>1{split($2,a,":"); if (a[2]==p && $4=="0A") ok=1} END{exit !ok}' /proc/net/tcp /proc/net/tcp6
+            {{- else }}
+            tcpSocket:
+              port: squid
+            {{- end }}
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
+            {{- if .Values.proxy.probes.quiet }}
+            exec:
+              command:
+                - sh
+                - -c
+                - awk -v p={{ printf "%04X" (int .Values.proxy.service.port) }} 'BEGIN{ok=0} FNR>1{split($2,a,":"); if (a[2]==p && $4=="0A") ok=1} END{exit !ok}' /proc/net/tcp /proc/net/tcp6
+            {{- else }}
             tcpSocket:
               port: squid
+            {{- end }}
             initialDelaySeconds: 10
             periodSeconds: 20
           volumeMounts:

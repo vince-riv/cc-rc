@@ -15,17 +15,48 @@ repo, each behind a locked-down [Squid](https://www.squid-cache.org/) egress pro
 - A Squid `Deployment` + `Service`, configured from `values.yaml` (allow list / deny
   list / default-blocked cluster-internal ranges). This is the only workload in the
   chart with unrestricted egress.
+- A pre-install/pre-upgrade hook `Job` (see "SSH deploy key" below) that generates an
+  ED25519 key and registers it against a GitHub account using one org's PAT (see
+  "Configuring GitHub auth" below), storing it in a `Secret`.
 - One `StatefulSet` (replicas: 1) per entry in `values.repos`, running the
   `ghcr.io/vince-riv/cc-rc` image. Each gets:
-  - a 500Mi PVC mounted at `/home/dev/.claude`
+  - a 5Gi PVC mounted at `/home/dev` — the `dev` user's entire home directory, not
+    just `~/.claude`
   - a 5Gi PVC mounted at `/workspace`
-  - an init container that clones the repo into `/workspace/repo` (skipped if already cloned)
+  - a `seed-home` init container that syncs the image's baked-in `/home/dev` onto the
+    home PVC on every start, with different rules for `~/.claude/` vs. everywhere else:
+    `~/.claude/` files the image ships (e.g. `~/.claude/settings.json`) are always
+    overwritten, but anything else already there — extra files, claude's own
+    credentials/session state (`~/.claude/.credentials.json`) — is never deleted;
+    everywhere else on the PVC is fully reset to match the image (deleting anything
+    the image doesn't ship), except `~/.cc-rc/` (this chart's own login-complete
+    marker — see "Claude login and remote-control" below) and `~/.claude.json`
+    (claude's own account/session state — a file sibling to the `~/.claude/`
+    directory, not inside it, so it needs its own exclusion)
+  - a `seed-ssh` init container that copies the deploy key onto `~/.ssh/id_ed25519`
+    (`0600`, `~/.ssh` itself `0700`) and seeds `~/.ssh/known_hosts` with GitHub's host
+    keys if it isn't already there — see "SSH deploy key" below
+  - a `clone-repo` init container that clones the repo, over SSH, into
+    `/workspace/repo` (skipped if already cloned)
   - `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` (+ lowercase variants) pointed at the Squid
-    `Service`, and `GH_TOKEN` from a `Secret`
+    `Service`, and `GH_TOKEN` from the `Secret` key matching this StatefulSet's own
+    `repos[].org`
+  - a startup script that runs `claude` in a `screen` session: see
+    "Claude login and remote-control" below
 - A `NetworkPolicy` that denies all egress from the agent `StatefulSet` pods except to
-  the Squid `Service` and to cluster DNS.
+  the Squid `Service` and to cluster DNS — git+ssh needs no separate rule, since it
+  tunnels through that same squid egress (see "SSH deploy key" below). Never applied to
+  the SSH-key `Job`'s pods either, which — like squid's — keep unrestricted egress.
 - A `ConfigMap` rendering `~/.gitconfig` and `~/.gitignore_global` for the `dev` user,
   mounted read-only into every agent.
+- A `ConfigMap` holding the `seed-home`/`seed-ssh`/`clone-repo`/`create-ssh-key`/
+  agent-entrypoint scripts (`charts/cc-rc/files/scripts/`), mounted read-only at
+  `/opt/cc-rc/scripts` rather than baked into the image — so a custom
+  `image.repository`/`image.tag` only needs to provide the underlying tools (`claude`,
+  `screen`, `git`, `rsync`, `ssh-keygen`, `connect` (from `connect-proxy`), `gh`,
+  `kubectl`), not this orchestration
+  logic. A `checksum/scripts` pod annotation rolls the `StatefulSet`s on any script
+  change.
 
 ## Installing
 
@@ -35,7 +66,7 @@ OCI artifact:
 ```sh
 helm install cc-rc oci://ghcr.io/vince-riv/charts/cc-rc --version 0.1.0 \
   --set repos[0].org=myorg --set repos[0].repo=myrepo \
-  --set github.token=ghp_... \
+  --set github.tokens.myorg=ghp_... \
   --set git.name="CI Bot" --set git.email=ci@example.com
 ```
 
@@ -47,22 +78,38 @@ helm repo add cc-rc https://vince-riv.github.io/cc-rc/
 helm repo update
 helm install cc-rc cc-rc/cc-rc --version 0.1.0 \
   --set repos[0].org=myorg --set repos[0].repo=myrepo \
-  --set github.token=ghp_... \
+  --set github.tokens.myorg=ghp_... \
   --set git.name="CI Bot" --set git.email=ci@example.com
 ```
 
 ## Configuring GitHub auth
 
-Set exactly one of:
+GitHub PATs are scoped to a single org and/or user, so one flat token rarely covers
+every `repos[]` entry — each per-repo agent's `GH_TOKEN` comes from the key matching
+its own `repos[].org`, within one shared Secret. Set exactly one of:
 
 ```yaml
 github:
-  token: "ghp_..."          # chart creates a Secret for you
+  tokens:                    # chart creates a Secret for you, one key per org
+    myorg: "ghp_..."
+    otherorg: "ghp_..."
 # or
 github:
-  existingSecret: "my-secret"
-  existingSecretKey: "token"  # defaults to "token"
+  existingSecret: "my-secret"  # holds the same shape: one key per org, key == org name
 ```
+
+For anything beyond quick testing, prefer `existingSecret` together with
+`scripts/manage-github-tokens.sh` (run from your own machine, needs `kubectl` access) —
+it keeps every PAT out of `values.yaml`/git entirely. It prompts for a PAT per org,
+pre-filled with that org's current value if the Secret already has one (so adding a new
+org, or rotating one, never means re-typing every other org's PAT), then
+`kubectl apply --server-side`s the merged result in one shot:
+
+```sh
+scripts/manage-github-tokens.sh -n my-namespace -s my-secret myorg otherorg
+```
+
+Run it with no `ORG` arguments to be prompted for org names interactively instead.
 
 ## Configuring per-repo resources
 
@@ -97,6 +144,183 @@ git:
   email: "ci@example.com"
 ```
 
+## SSH deploy key
+
+Every agent clones and pushes over SSH, using one ED25519 key shared by all repos in
+the release. A pre-install/pre-upgrade hook `Job` (`create-ssh-key.sh`, run as the
+`dev` image with a scoped `ServiceAccount`) creates it:
+
+1. Skip entirely if `sshKey.secretName` already exists — makes the whole thing
+   idempotent across every `helm install`/`upgrade`.
+2. `ssh-keygen -t ed25519` a fresh key pair.
+3. `gh api /user/keys` to register the public half against the GitHub account behind
+   `sshKey.tokenOrg`'s PAT (defaults to `repos[0].org`'s; that token needs the
+   `write:public_key` scope), titled `sshKey.keyTitle`. SSH keys are account-level, not
+   org-scoped, so this one key is shared by every `repos[]` entry — `tokenOrg` only
+   needs to name an org whose PAT belongs to an account that can reach all of them.
+4. `kubectl create secret generic sshKey.secretName` holding both halves. If this step
+   fails, the just-added GitHub key is deleted again (`gh api -X DELETE /user/keys/<id>`)
+   so a retry doesn't pile up orphaned keys on the account — the public key only stays
+   registered if the `Secret` write actually succeeded.
+
+The Job's `ServiceAccount` can only `create` `Secret`s, and `get`/`delete` the one named
+by `sshKey.secretName` — nothing broader. It isn't proxied and isn't subject to the
+agent `NetworkPolicy` either (see "What it deploys" above): it talks to the Kubernetes
+API and `api.github.com` directly.
+
+Each agent's `seed-ssh` init container then copies that `Secret` onto the home PVC on
+every boot (`~/.ssh/id_ed25519` at `0600`, `~/.ssh` at `0700`) and seeds
+`~/.ssh/known_hosts` with GitHub's published host keys — but only if `known_hosts`
+doesn't already exist, so it's never clobbered once present. It also (re)writes
+`~/.ssh/config` on every boot, pointing `git@github.com` at a `ProxyCommand` (the
+`connect-proxy` package's `connect`) that tunnels the SSH connection through squid via
+`CONNECT` — squid's own config unconditionally allows `CONNECT` to `github.com:22`
+(regardless of `proxy.allowList`/`proxy.denyList`, unless `github.com` is itself denied)
+— so no separate `NetworkPolicy` rule is needed: agent pods already have egress to the
+squid `Service`, and squid's own egress is unrestricted.
+
+Set `sshKey.enabled: false` to skip the Job (e.g. you manage `sshKey.secretName`
+yourself, out of band) — the per-repo `StatefulSet`s still expect it to hold
+`id_ed25519`/`id_ed25519.pub` either way.
+
+## Claude login and remote-control
+
+On its first boot, each agent starts a detached, logged `screen` session with an
+interactive login shell in it (checked via a `~/.cc-rc/login-complete` marker file on
+the home PVC, so this only happens once per repo, ever — it persists across restarts):
+
+```sh
+screen -L -Logfile /tmp/cc-rc-claude-login.log -dmS claude-login bash -lic 'cd /workspace/repo && exec bash -li'
+```
+
+`-L -Logfile` matters: `screen` sessions are otherwise invisible to `kubectl logs`/
+stern entirely. The agent `tail -F`s that log into its own stdout, so session output —
+including any errors — shows up there too; attach interactively if needed:
+
+```sh
+kubectl exec -it <pod> -- screen -r claude-login
+```
+
+Every interactive bash shell in the container — that session, or any ad-hoc
+`kubectl exec -it <pod> -- bash` — runs `files/scripts/bash-prompt-hook.sh` (via
+`$PROMPT_COMMAND`, chart-set, not baked into the image) once per shell session. While
+login is incomplete it prints instructions (`claude`, then `/login`) and defines a
+`cc-rc-finish-login` helper. Completion is **only** signaled by explicitly running
+`cc-rc-finish-login` — never auto-detected from a running `claude remote-control`
+process, since its first real run can take a few minutes to configure, and treating
+its mere appearance as "done" risks moving on before that finishes. Running
+`cc-rc-finish-login` writes the marker file; the agent then exits — the pod restarts
+(StatefulSet pods always use `restartPolicy: Always`) into steady-state mode, where
+every subsequent boot instead prunes stale worktrees (see below) and then runs:
+
+```sh
+screen -L -Logfile /tmp/cc-rc-remote-control.log -dmS remote-control bash -lic 'cd /workspace/repo && claude remote-control --name <name> --permission-mode <mode> --spawn <mode> --capacity <n>'
+```
+
+(`--continue` was tried here to reattach the last-recorded session instead of always
+starting fresh, and dropped: `claude remote-control` rejects `--continue` combined with
+`--spawn`/`--capacity`, and confirmed by hand that it doesn't reattach worktree sessions
+the way we need anyway — see "Worktree pruning and orphaned-session recovery" below for
+the recovery path that does work.)
+
+`--name` defaults to the pod's hostname (e.g. `cc-rc-myorg-myrepo-0`) plus a
+`-<timestamp>` suffix, unless `repos[].remoteControl.name` is set — the suffix keeps
+each boot's session visibly distinct in claude.ai/code. `--permission-mode`, `--spawn`,
+`--capacity`, and the settings below come from `remoteControl.*` (global defaults) or
+`repos[].remoteControl.*` (per-repo override):
+
+```yaml
+remoteControl:
+  permissionMode: bypassPermissions   # acceptEdits | auto | bypassPermissions | default | dontAsk | plan
+  spawn: worktree                     # same-dir | worktree | session
+  capacity: 8
+  unhealthyTimeoutSeconds: 45         # steady-state: how long remote-control may be down before restarting
+  firstBootTimeoutSeconds: 900        # first boot: how long to wait for a human to finish /login
+  worktreeMaxAgeDays: 10              # remove .claude/worktrees/ checkouts inactive this long, on boot
+```
+
+The container's readiness probe checks for a running `claude remote-control` process
+directly (no grace period). There's deliberately no `livenessProbe`: the agent
+container manages its own exit-on-unhealthy instead, so `unhealthyTimeoutSeconds` is
+actually honored rather than being pre-empted by kubelet on its own schedule — the
+container exits (triggering a restart) once the process has been down that long.
+Raise it (e.g. `--set remoteControl.unhealthyTimeoutSeconds=600`) to get more time to
+`kubectl exec -it <pod> -- bash` in and debug a startup failure — the tailed log and
+`screen -r remote-control` both stay attachable throughout that window.
+
+### Graceful shutdown
+
+On `SIGTERM` (pod termination — rollout, eviction, delete), the agent forwards
+`SIGINT` to any running `claude remote-control` process and waits for it to exit
+before exiting itself (confirmed `claude` exits cleanly on `SIGINT`, same as
+interactive `Ctrl-C`). This matters because a hard kill mid-write can leave a
+worktree locked. Kubernetes' default `terminationGracePeriodSeconds` (30s) is short
+for this, so the chart raises it — `terminationGracePeriodSeconds: 60` at the
+top level (not per-repo).
+
+### Worktree pruning and orphaned-session recovery ([issue #9](https://github.com/vince-riv/cc-rc/issues/9))
+
+`claude remote-control --spawn worktree` isolates each on-demand session in its own
+git worktree under `.claude/worktrees/`, and nothing removes them. On every boot,
+before starting `remote-control`, the agent cross-references each worktree against
+`~/.claude/sessions/*.json` (one file per session host process — see the recovery tool
+below):
+- No matching entry at all → removed immediately, regardless of age.
+- A matching entry whose session hasn't been active (per its `ccr-tip.json`
+  `updatedAt`) in `worktreeMaxAgeDays` days → the worktree **and** its session
+  bookkeeping files (`~/.claude/sessions/<pid>.json` + `.key`,
+  `~/.claude/session-env/<sessionId>/`) are removed together. The transcript itself
+  (`~/.claude/projects/.../*.jsonl`) is left alone.
+- A matching entry more recent than that → left alone (still rescuable, see below).
+
+Removal uses `git worktree remove --force --force` (not a single `--force`) since a
+worktree still in use by `claude remote-control` may be *locked*, not just dirty — one
+`--force` only overrides an unclean worktree, not a lock. If `~/.claude/sessions/*.json`
+or `ccr-tip.json` doesn't match the shape this logic depends on (claude changed its
+format), pod startup fails outright rather than risk mis-pruning an in-use worktree.
+
+Separately — and this is an upstream `claude remote-control` gap, not something this
+chart can fully fix (tracked in issue #9) — a worktree session whose host process
+dies (pod restart mid-conversation) becomes unreachable from claude.ai/code ("session
+not found"), even though its local transcript survives. The image ships a manual
+recovery tool for this, `rescue-sessions.sh` (not chart-delivered — baked into the
+image directly, so it works regardless of chart version):
+
+```sh
+kubectl exec -it <pod> -- rescue-sessions.sh                              # list orphaned sessions
+kubectl exec -it <pod> -- rescue-sessions.sh --rescue <bridgeSessionId>   # start a rescue screen session
+kubectl exec -it <pod> -- screen -r rescue-<bridgeSessionId>              # attach to it
+```
+`--rescue` runs `claude remote-control --session-id <bridgeSessionId>` in the
+worktree it was orphaned in, which re-registers that exact session with
+claude.ai/code. It's manual only — orphaned sessions are surfaced for a human to
+decide on, never auto-resumed on boot.
+
+## Scheduling (nodeSelector / affinity / tolerations / PDB)
+
+Squid (`proxy.nodeSelector`/`proxy.affinity`/`proxy.tolerations`) and the per-repo
+agent StatefulSets (top-level `nodeSelector`/`affinity`/`tolerations`, overridable
+per-repo via `repos[].nodeSelector`/`repos[].affinity`/`repos[].tolerations` — a full
+replace, not a merge, when set) are configured independently; there's no single
+shared/global setting covering both.
+
+When `proxy.replicaCount > 1` and `proxy.affinity` is left empty, a preferred
+`podAntiAffinity` (`topologyKey: kubernetes.io/hostname`) is generated automatically,
+spreading squid replicas across nodes — set `proxy.affinity` explicitly to take full
+control instead (it's used as-is, replacing the auto-generation entirely).
+
+`proxy.podDisruptionBudget.enabled` (default `false`) creates a PDB for squid, but
+only when `proxy.replicaCount > 1` too — a single-replica PDB just blocks voluntary
+eviction of the only pod that exists:
+
+```yaml
+proxy:
+  replicaCount: 2
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+```
+
 ## Configuring egress
 
 `proxy.allowList` empty (default) = open-web mode: any destination is reachable on
@@ -105,9 +329,14 @@ and the baked-in cluster-internal ranges (`cluster.local`, `192.168.0.0/16`,
 `10.0.0.0/8`, `172.16.0.0/12`).
 
 Setting `proxy.allowList` switches to strict mode: only those domains/CIDRs (ports
-80/443) are reachable. There is **no** automatic `github.com:22` carve-out in strict
-mode — add `github.com` to `proxy.allowList` yourself if you need it there.
-`proxy.denyList` always wins over `proxy.allowList`.
+80/443) are reachable — `github.com:22` is still carved out in this mode too (every
+agent needs it for its own deploy key; see "SSH deploy key" above), unless `github.com`
+is itself in `proxy.denyList`, which always wins over both.
+
+Squid's access/cache logs go to `kubectl logs`/`stern` on the squid `Deployment` pod —
+`squid.conf` sends them to `/dev/stdout`, and `PEBBLE_VERBOSE=1` makes the base image's
+Pebble entrypoint relay that to its own stdout (otherwise it's only visible via
+`kubectl exec <squid-pod> -- pebble logs squid`).
 
 {{ template "chart.maintainersSection" . }}
 
@@ -125,7 +354,7 @@ mode — add `github.com` to `proxy.allowList` yourself if you need it there.
 helm lint charts/cc-rc
 helm template cc-rc charts/cc-rc \
   --set repos[0].org=myorg --set repos[0].repo=myrepo \
-  --set github.token=dummy \
+  --set github.tokens.myorg=dummy \
   --set git.name="CI Bot" --set git.email=ci@example.com
 helm unittest charts/cc-rc
 ```

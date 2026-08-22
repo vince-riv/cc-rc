@@ -2,7 +2,9 @@ suite: agent egress NetworkPolicy (happy path)
 templates:
   - networkpolicy-agent.yaml
 set:
-  github.token: dummy-token
+  github:
+    tokens:
+      myorg: dummy-token
   git:
     name: CI Bot
     email: ci@example.com
@@ -67,6 +69,28 @@ tests:
       - equal:
           path: spec.egress[0].ports[0].port
           value: 5353
+
+  - it: allows direct egress to Anthropic's network CIDRs on 443
+    asserts:
+      - contains:
+          path: spec.egress[2].to
+          content:
+            ipBlock:
+              cidr: 160.79.104.0/23
+      - contains:
+          path: spec.egress[2].to
+          content:
+            ipBlock:
+              cidr: 2607:6bc0::/48
+      - equal:
+          path: spec.egress[2].ports[0].port
+          value: 443
+
+  - it: has exactly 3 egress rules (DNS, squid, Anthropic) - no separate rule for git+ssh, which tunnels through squid
+    asserts:
+      - lengthEqual:
+          path: spec.egress
+          count: 3
 
   - it: is omitted entirely when networkPolicy.enabled is false
     set:

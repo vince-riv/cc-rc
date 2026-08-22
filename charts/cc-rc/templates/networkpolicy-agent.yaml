@@ -40,4 +40,19 @@ spec:
       ports:
         - protocol: TCP
           port: {{ .Values.proxy.service.port }}
+    # Anthropic's network CIDRs, so *.anthropic.com traffic (see NO_PROXY in
+    # statefulset-repo.yaml) can bypass squid and go direct instead of
+    # through the proxy.
+    - to:
+        - ipBlock:
+            cidr: 160.79.104.0/23
+        - ipBlock:
+            cidr: 2607:6bc0::/48
+      ports:
+        - protocol: TCP
+          port: 443
+    # No separate rule needed for git+ssh: agents tunnel it through squid
+    # (already allowed above, port 3128) via ProxyCommand/CONNECT - see
+    # files/scripts/seed-ssh.sh's ~/.ssh/config and squid.conf's
+    # github_ssh/port_22 ACL.
 {{- end }}

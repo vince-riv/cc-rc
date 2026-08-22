@@ -3,8 +3,11 @@ templates:
   - deployment-squid.yaml
   - service-squid.yaml
   - configmap-squid.yaml
+  - poddisruptionbudget-squid.yaml
 set:
-  github.token: dummy-token
+  github:
+    tokens:
+      myorg: dummy-token
   git:
     name: CI Bot
     email: ci@example.com
@@ -37,6 +40,182 @@ tests:
       - equal:
           path: spec.template.metadata.labels["app.kubernetes.io/component"]
           value: proxy
+
+  - it: defaults revisionHistoryLimit to 5
+    template: deployment-squid.yaml
+    asserts:
+      - equal:
+          path: spec.revisionHistoryLimit
+          value: 5
+
+  - it: proxy.revisionHistoryLimit overrides the default
+    template: deployment-squid.yaml
+    set:
+      proxy.revisionHistoryLimit: 2
+    asserts:
+      - equal:
+          path: spec.revisionHistoryLimit
+          value: 2
+
+  - it: no nodeSelector/affinity/PDB by default, even with replicas=1
+    template: deployment-squid.yaml
+    asserts:
+      - notExists:
+          path: spec.template.spec.nodeSelector
+      - notExists:
+          path: spec.template.spec.affinity
+
+  - it: no PDB is rendered when podDisruptionBudget.enabled is false, regardless of replicas
+    template: poddisruptionbudget-squid.yaml
+    set:
+      proxy.replicaCount: 3
+      proxy.podDisruptionBudget.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: no PDB is rendered when replicas=1, even if podDisruptionBudget.enabled is true
+    template: poddisruptionbudget-squid.yaml
+    set:
+      proxy.replicaCount: 1
+      proxy.podDisruptionBudget.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders a PDB when enabled and replicas > 1
+    template: poddisruptionbudget-squid.yaml
+    set:
+      proxy.replicaCount: 3
+      proxy.podDisruptionBudget.enabled: true
+      proxy.podDisruptionBudget.minAvailable: 2
+    asserts:
+      - isKind:
+          of: PodDisruptionBudget
+      - equal:
+          path: spec.minAvailable
+          value: 2
+      - equal:
+          path: spec.selector.matchLabels["app.kubernetes.io/component"]
+          value: proxy
+
+  - it: sets nodeSelector when proxy.nodeSelector is set
+    template: deployment-squid.yaml
+    set:
+      proxy.nodeSelector:
+        disktype: ssd
+    asserts:
+      - equal:
+          path: spec.template.spec.nodeSelector.disktype
+          value: ssd
+
+  - it: no tolerations by default, set when proxy.tolerations is set
+    template: deployment-squid.yaml
+    asserts:
+      - notExists:
+          path: spec.template.spec.tolerations
+  - it: sets tolerations when proxy.tolerations is set
+    template: deployment-squid.yaml
+    set:
+      proxy.tolerations:
+        - key: dedicated
+          operator: Equal
+          value: squid
+          effect: NoSchedule
+    asserts:
+      - equal:
+          path: spec.template.spec.tolerations[0].key
+          value: dedicated
+
+  - it: auto-generates a preferred podAntiAffinity when replicas > 1 and no explicit affinity is set
+    template: deployment-squid.yaml
+    set:
+      proxy.replicaCount: 3
+    asserts:
+      - equal:
+          path: spec.template.spec.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution[0].podAffinityTerm.topologyKey
+          value: kubernetes.io/hostname
+      - equal:
+          path: spec.template.spec.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution[0].podAffinityTerm.labelSelector.matchLabels["app.kubernetes.io/component"]
+          value: proxy
+
+  - it: does not auto-generate anti-affinity when replicas=1
+    template: deployment-squid.yaml
+    set:
+      proxy.replicaCount: 1
+    asserts:
+      - notExists:
+          path: spec.template.spec.affinity
+
+  - it: explicit proxy.affinity replaces auto-generated anti-affinity, even with replicas > 1
+    template: deployment-squid.yaml
+    set:
+      proxy.replicaCount: 3
+      proxy.affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/arch
+                    operator: In
+                    values: ["amd64"]
+    asserts:
+      - notExists:
+          path: spec.template.spec.affinity.podAntiAffinity
+      - equal:
+          path: spec.template.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].key
+          value: kubernetes.io/arch
+
+  - it: always uses a tcpSocket startupProbe, regardless of proxy.probes.quiet
+    template: deployment-squid.yaml
+    set:
+      proxy.probes.quiet: false
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].startupProbe.tcpSocket.port
+          value: squid
+
+  - it: defaults readiness/liveness to the quiet /proc/net/tcp exec probe
+    template: deployment-squid.yaml
+    asserts:
+      - isNull:
+          path: spec.template.spec.containers[0].readinessProbe.tcpSocket
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.exec.command[0]
+          value: sh
+      - matchRegex:
+          path: spec.template.spec.containers[0].readinessProbe.exec.command[2]
+          pattern: "0C38"
+      - isNull:
+          path: spec.template.spec.containers[0].livenessProbe.tcpSocket
+      - matchRegex:
+          path: spec.template.spec.containers[0].livenessProbe.exec.command[2]
+          pattern: "0C38"
+
+  - it: uses tcpSocket for readiness/liveness when proxy.probes.quiet is false
+    template: deployment-squid.yaml
+    set:
+      proxy.probes.quiet: false
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.tcpSocket.port
+          value: squid
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.tcpSocket.port
+          value: squid
+      - isNull:
+          path: spec.template.spec.containers[0].readinessProbe.exec
+      - isNull:
+          path: spec.template.spec.containers[0].livenessProbe.exec
+
+  - it: sets PEBBLE_VERBOSE so squid's access/cache logs reach kubectl logs/stern
+    template: deployment-squid.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PEBBLE_VERBOSE
+            value: "1"
 
   - it: renders a squid ClusterIP Service on the proxy port
     template: service-squid.yaml
@@ -74,7 +253,18 @@ tests:
           path: data["squid.conf"]
           pattern: "acl default_blocked_cidrs dst 192.168.0.0/16 10.0.0.0/8 172.16.0.0/12"
 
-  - it: strict allow-list mode restricts to allowed destinations with no ssh carve-out
+  - it: sends access_log and cache_log to stdout instead of the default log files
+    template: configmap-squid.yaml
+    asserts:
+      - matchRegex:
+          path: data["squid.conf"]
+          pattern: "access_log stdio:/dev/stdout squid"
+      - matchRegex:
+          path: data["squid.conf"]
+          pattern: "cache_log /dev/stdout"
+
+
+  - it: strict allow-list mode restricts to allowed destinations, but still carves out github.com:22 for git+ssh
     template: configmap-squid.yaml
     set:
       proxy.allowList:
@@ -87,9 +277,12 @@ tests:
       - matchRegex:
           path: data["squid.conf"]
           pattern: "acl allow_cidrs dst 140.82.112.0/20"
-      - notMatchRegex:
+      - matchRegex:
           path: data["squid.conf"]
-          pattern: "acl github_ssh"
+          pattern: "acl github_ssh dstdomain github.com"
+      - matchRegex:
+          path: data["squid.conf"]
+          pattern: "http_access allow github_ssh port_22"
       - matchRegex:
           path: data["squid.conf"]
           pattern: "http_access deny all"

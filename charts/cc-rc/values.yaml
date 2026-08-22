@@ -5,18 +5,52 @@ image:
   pullPolicy: Always
 
 # -- GitHub auth for cloning repos and for the `gh`/`git` CLIs inside each agent.
-# Set EXACTLY ONE of `token` or `existingSecret`.
+# One GitHub PAT per org - GitHub PATs are scoped to a single org and/or user, so a
+# single flat token rarely covers every repos[] entry. Every per-repo agent's GH_TOKEN
+# comes from the key matching ITS OWN repos[].org within one Secret. Set EXACTLY ONE of
+# `tokens` or `existingSecret`.
 github:
-  # -- Set this to a GitHub PAT to have the chart create a Secret for you.
-  token: ""
-  # -- Name of a pre-existing Secret to use instead of `token`. Mutually exclusive with `token`.
+  # -- Map of org name -> GitHub PAT. Chart creates a Secret from this map (one key per
+  # org, keyed by org name) if set. Fine for quick testing, but for anything long-lived
+  # prefer `existingSecret` plus `scripts/manage-github-tokens.sh`, which keeps tokens
+  # out of values.yaml/git entirely.
+  tokens: {}
+  # tokens:
+  #   myorg: ghp_...
+  #   otherorg: ghp_...
+
+  # -- Name of a pre-existing Secret to use instead of `tokens`, holding one key per org
+  # (key name == org name, matching repos[].org) - see `scripts/manage-github-tokens.sh`.
+  # Mutually exclusive with `tokens`.
   existingSecret: ""
-  # -- Key within `existingSecret` that holds the token.
-  existingSecretKey: "token"
-  # -- Name of the Secret the chart creates when `token` is set.
-  secretName: "cc-rc-github-token"
-  # -- Key used inside the chart-managed Secret.
-  secretKey: "token"
+  # -- Name of the Secret the chart creates when `tokens` is set. Defaults to
+  # "<release>-cc-rc-github-tokens" when left empty.
+  secretName: ""
+
+# -- ED25519 SSH deploy key, generated once by a pre-install/pre-upgrade hook Job and
+# added to a GitHub account (via `gh api /user/keys` - that account's PAT needs the
+# `write:public_key` scope). Every per-repo agent then clones/pushes over SSH using this
+# key instead of an HTTPS URL with an embedded token. SSH keys are account-level, not
+# org-scoped, so ONE key is generated and shared across every repos[] entry - it just
+# needs registering with a token from an account that can reach all of them.
+sshKey:
+  # -- Set false to skip the key-generation Job (e.g. you manage `secretName`
+  # yourself out of band). Per-repo agents always clone over SSH and expect
+  # `secretName` to hold `id_ed25519`/`id_ed25519.pub` either way.
+  enabled: true
+  # -- Name of the Secret holding the generated key. The Job creates it only
+  # if it doesn't already exist, and is a no-op otherwise. Defaults to
+  # "<release>-cc-rc-ssh-key" when left empty.
+  secretName: ""
+  # -- Title shown for this key under the GitHub account's SSH keys settings.
+  keyTitle: "cc-rc"
+  # -- Which org's PAT (a key in the github Secret) to use when registering the deploy
+  # key. Defaults to repos[0].org when left empty - only matters if your orgs' tokens
+  # belong to different GitHub accounts, since the "right" one has to be able to see
+  # every repo you want the shared key to reach.
+  tokenOrg: ""
+  # -- Container resources for the key-generation Job.
+  resources: {}
 
 # -- Git identity and global config for the `dev` user inside each agent, rendered
 # into ~/.gitconfig and ~/.gitignore_global via a ConfigMap. Commit signing is
@@ -48,11 +82,14 @@ git:
     - "*.pyc"
     - "__pycache__"
     - "**/.claude/settings.local.json"
+    - "**/.claude/worktrees/"
 
 # -- One StatefulSet is created per entry. `org`/`repo` are the GitHub org and repo name.
-# Optional per-entry `resources` and `storage` override the defaults below. `resources`
-# is deep-merged over the top-level `resources` default, so a repo can override just
-# cpu or just memory without having to repeat the other.
+# Optional per-entry `resources`, `storage`, and `remoteControl` override the defaults
+# below. `resources` is deep-merged over the top-level `resources` default, so a repo
+# can override just cpu or just memory without having to repeat the other.
+# `nodeSelector`/`affinity`, if set, fully replace (not merge with) the top-level
+# `nodeSelector`/`affinity` defaults for that repo's StatefulSet.
 repos: []
   # - org: myorg
   #   repo: myrepo
@@ -64,17 +101,79 @@ repos: []
   #       cpu: "2"
   #       memory: 4Gi
   #   storage:
-  #     claudeSize: 500Mi
+  #     homeSize: 500Mi
   #     workspaceSize: 5Gi
+  #   remoteControl:
+  #     name: myorg-myrepo          # defaults to the pod hostname when unset
+  #     permissionMode: bypassPermissions
+  #     spawn: worktree
+  #     capacity: 8
+  #     unhealthyTimeoutSeconds: 45
+  #     firstBootTimeoutSeconds: 900
+  #     worktreeMaxAgeDays: 10
+  #   nodeSelector:
+  #     disktype: ssd
+  #   affinity: {}
+  #   tolerations: []
+
+# -- Default nodeSelector for every per-repo agent StatefulSet. Override per-repo via
+# `repos[].nodeSelector` (full replace, not merged with this default).
+nodeSelector: {}
+
+# -- Default affinity for every per-repo agent StatefulSet. Override per-repo via
+# `repos[].affinity` (full replace, not merged with this default).
+affinity: {}
+
+# -- Default tolerations for every per-repo agent StatefulSet. Override per-repo via
+# `repos[].tolerations` (full replace, not merged with this default).
+tolerations: []
+
+# -- Number of old ControllerRevisions to keep for rollback (StatefulSet's
+# revisionHistoryLimit) for each per-repo agent StatefulSet.
+revisionHistoryLimit: 5
 
 # -- Default persistent volume sizes for each per-repo agent.
 storage:
-  # -- Size of the PVC mounted at /home/dev/.claude
-  claudeSize: 500Mi
+  # -- Size of the PVC mounted at /home/dev (the dev user's entire home directory —
+  # claude config/credentials, shell history, etc. — not just ~/.claude).
+  homeSize: 5Gi
   # -- Size of the PVC mounted at /workspace
   workspaceSize: 5Gi
   # -- StorageClass for both PVCs. "" uses the cluster default.
   storageClassName: ""
+
+# -- Defaults for the `claude remote-control` invocation each agent runs once login
+# is complete (see the seed-home/clone-repo init containers and the agent container's
+# startup logic). Any of these can be overridden per-repo via `repos[].remoteControl`.
+remoteControl:
+  # -- --permission-mode. One of: acceptEdits, auto, bypassPermissions, default,
+  # dontAsk, plan.
+  permissionMode: bypassPermissions
+  # -- --spawn. One of: same-dir, worktree, session.
+  spawn: worktree
+  # -- --capacity
+  capacity: 8
+  # -- Seconds `claude remote-control` may be down (never started, or crashed)
+  # before the agent container exits, restarting the pod. Kept fairly short by
+  # default so a genuine crash self-heals promptly; raise it (e.g. via --set)
+  # while debugging a startup failure, since it's also the window you have to
+  # `kubectl exec` in and inspect before the container cycles.
+  unhealthyTimeoutSeconds: 45
+  # -- Seconds to wait, on first boot (no login-complete marker yet), for a
+  # human to finish `claude`'s /login flow before the agent container exits
+  # and the pod restarts to retry. Much longer than unhealthyTimeoutSeconds
+  # since it's bounding an interactive human step, not a crash.
+  firstBootTimeoutSeconds: 900
+  # -- Days of inactivity (no transcript writes) before a `.claude/worktrees/`
+  # checkout is removed via `git worktree remove`. Checked once per boot,
+  # before remote-control starts.
+  worktreeMaxAgeDays: 10
+
+# -- Seconds kubelet waits after sending SIGTERM before sending SIGKILL to the
+# agent container. Raised above Kubernetes' 30s default so claude has real
+# time to exit cleanly (agent-entrypoint.sh forwards SIGINT to it on SIGTERM)
+# rather than getting killed mid-write and leaving a worktree locked.
+terminationGracePeriodSeconds: 60
 
 # -- Default container resources for the per-repo agent container. Empty means no
 # requests/limits are set.
@@ -97,10 +196,45 @@ proxy:
     tag: 7.2-26.04_edge@sha256:382ea00b5219492965a9ddd47da758317b77cd2f37d31b57fbf396ac6445daea
     pullPolicy: IfNotPresent
   replicaCount: 1
+  # -- Number of old ReplicaSets to keep for rollback (Deployment's
+  # revisionHistoryLimit).
+  revisionHistoryLimit: 5
   service:
     port: 3128
     type: ClusterIP
   resources: {}
+
+  # -- nodeSelector for the squid Deployment.
+  nodeSelector: {}
+
+  # -- affinity for the squid Deployment. When left empty AND replicaCount > 1, a
+  # preferred podAntiAffinity (topologyKey: kubernetes.io/hostname) is generated
+  # automatically, spreading squid replicas across nodes. Set this explicitly to
+  # take full control instead (it's used as-is, replacing that auto-generation).
+  affinity: {}
+
+  # -- tolerations for the squid Deployment.
+  tolerations: []
+
+  # -- PodDisruptionBudget for the squid Deployment. Only created when `enabled` is
+  # true AND `replicaCount` > 1 (a PDB with a single replica just blocks voluntary
+  # eviction of the only pod).
+  podDisruptionBudget:
+    enabled: false
+    # -- minAvailable, per the same semantics as PodDisruptionBudgetSpec.minAvailable.
+    minAvailable: 1
+
+  # -- Readiness/liveness probe behavior. The startup probe always uses
+  # tcpSocket, regardless of this setting.
+  probes:
+    # -- When true (default), readiness/liveness probes check for a LISTEN
+    # socket via /proc/net/tcp[6] instead of connecting - squid can't log a
+    # connection it never saw, so this keeps NONE_NONE/000
+    # error:transaction-end-before-headers noise out of the access log. This
+    # is a weaker check than tcpSocket: it confirms squid is listening, not
+    # that it's actually accepting connections. Set to false to use
+    # tcpSocket instead, at the cost of that log noise on every probe.
+    quiet: true
 
   # -- Destinations agents are allowed to reach.
   # Each entry is either a domain (e.g. "example.com", or ".example.com" to also match
@@ -108,9 +242,10 @@ proxy:
   #
   # When EMPTY: all web traffic is permitted (subject to denyList/defaultBlocked below),
   # on the ports listed in allowedPortsWhenOpen, plus github.com:22 for git+ssh.
-  # When NON-EMPTY: only these destinations are reachable (on ports 80/443). There is
-  # NO automatic github.com:22 carve-out in this mode — add github.com yourself if
-  # ssh access to it is needed.
+  # When NON-EMPTY: only these destinations are reachable (on ports 80/443), plus
+  # github.com:22 for git+ssh - that carve-out applies in BOTH modes (agents always
+  # clone/push over SSH, tunneled through squid; see sshKey above), unless github.com
+  # is itself in denyList.
   allowList: []
     # - github.com
     # - .githubusercontent.com
@@ -118,7 +253,7 @@ proxy:
     # - 140.82.112.0/20
 
   # -- Destinations that are always blocked, regardless of allow-list mode. Takes
-  # precedence over allowList and over the open-web-mode github.com:22 rule.
+  # precedence over allowList and over the github.com:22 git+ssh carve-out.
   denyList: []
     # - .evil.example.com
     # - 203.0.113.0/24

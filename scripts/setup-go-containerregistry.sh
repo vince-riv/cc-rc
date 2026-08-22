@@ -26,3 +26,6 @@ curl -fsSL -o /tmp/gcr_checksums.txt \
 tar -xzf "/tmp/${tarball}" -C /tmp
 find /tmp -maxdepth 1 -type f ! -name '*.md' ! -iname LICENSE ! -name '*.tar.gz' ! -name '*_checksums.txt' \
     -exec install -m 0755 {} /usr/local/bin/ \;
+
+crane version
+krane version

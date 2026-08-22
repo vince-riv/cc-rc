@@ -12,20 +12,21 @@ Agent StatefulSets ({{ len .Values.repos }}):
 
 Squid is running in OPEN-WEB mode (proxy.allowList is empty): all destinations are
 reachable on the configured ports ({{ .Values.proxy.allowedPortsWhenOpen | join ", " }}),
-plus github.com:22 for git+ssh, except proxy.denyList and the baked-in cluster-internal
-ranges.
+except proxy.denyList and the baked-in cluster-internal ranges.
 {{- else }}
 
 Squid is running in STRICT ALLOW-LIST mode. Only these destinations (ports 80/443) are
-reachable — there is NO automatic github.com:22 carve-out in this mode:
+reachable:
 {{- range .Values.proxy.allowList }}
   - {{ . }}
 {{- end }}
-NOTE: if your agents need to clone/pull over HTTPS, make sure github.com (and, if you use
-GitHub-hosted release assets or raw content, .githubusercontent.com) is included above.
-If you need ssh access to github.com under strict mode, add github.com to
-proxy.allowList yourself — port 22 is not opened automatically here.
+NOTE: if your agents need to clone/pull over HTTPS too (e.g. release assets, raw
+content), make sure the relevant host (github.com, .githubusercontent.com, ...) is
+included above.
 {{- end }}
+
+git+ssh (github.com:22) is always reachable, in both modes, tunneled through squid -
+see "SSH deploy key" in charts/cc-rc/README.md.
 
 Each agent pod's PVCs (/home/dev/.claude, /workspace) persist across restarts, and the
 init container skips re-cloning if the repo is already present in /workspace.

@@ -60,21 +60,30 @@ the 63-char DNS label limit.
 {{- end -}}
 
 {{/*
-Name of the Secret holding GH_TOKEN, whether chart-managed or pre-existing.
+Name of the Secret holding one GH_TOKEN per org, whether chart-managed or
+pre-existing. Falls back to "<fullname>-github-tokens" when github.secretName
+is unset. The key to read within it is always the org name itself (see
+cc-rc.validateGithubAuth) - there's no separate "secretKey" concept anymore,
+since one token per org means the org name IS the key.
 */}}
 {{- define "cc-rc.githubSecretName" -}}
-{{- .Values.github.existingSecret | default .Values.github.secretName -}}
+{{- .Values.github.existingSecret | default (.Values.github.secretName | default (printf "%s-github-tokens" (include "cc-rc.fullname" .))) -}}
 {{- end -}}
 
 {{/*
-Key within the GH_TOKEN Secret, whether chart-managed or pre-existing.
+Name of the Secret holding the SSH deploy key. Falls back to
+"<fullname>-ssh-key" when sshKey.secretName is unset.
 */}}
-{{- define "cc-rc.githubSecretKey" -}}
-{{- if .Values.github.existingSecret -}}
-{{- .Values.github.existingSecretKey -}}
-{{- else -}}
-{{- .Values.github.secretKey -}}
+{{- define "cc-rc.sshKeySecretName" -}}
+{{- .Values.sshKey.secretName | default (printf "%s-ssh-key" (include "cc-rc.fullname" .)) -}}
 {{- end -}}
+
+{{/*
+Which org's PAT (a key in the github Secret) the sshKey Job registers the
+deploy key with - sshKey.tokenOrg if set, else repos[0].org.
+*/}}
+{{- define "cc-rc.sshKeyTokenOrg" -}}
+{{- .Values.sshKey.tokenOrg | default (first .Values.repos).org -}}
 {{- end -}}
 
 {{/*
@@ -85,15 +94,41 @@ Fully qualified squid Service name.
 {{- end -}}
 
 {{/*
+Preferred podAntiAffinity spreading squid replicas across nodes, keyed on the
+proxy selector labels. Only meant to be used when proxy.affinity is empty and
+proxy.replicaCount > 1 - explicit proxy.affinity always takes precedence.
+*/}}
+{{- define "cc-rc.squidAntiAffinity" -}}
+podAntiAffinity:
+  preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      podAffinityTerm:
+        topologyKey: kubernetes.io/hostname
+        labelSelector:
+          matchLabels:
+            {{- include "cc-rc.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: proxy
+{{- end -}}
+
+{{/*
 Validate github token configuration. Call from any template that needs the
 Secret to exist (fails the whole render if misconfigured).
 */}}
 {{- define "cc-rc.validateGithubAuth" -}}
-{{- if and .Values.github.token .Values.github.existingSecret -}}
-{{ fail "github.token and github.existingSecret are mutually exclusive; set only one." }}
+{{- if and .Values.github.tokens .Values.github.existingSecret -}}
+{{ fail "github.tokens and github.existingSecret are mutually exclusive; set only one." }}
 {{- end -}}
-{{- if not (or .Values.github.token .Values.github.existingSecret) -}}
-{{ fail "one of github.token or github.existingSecret must be set." }}
+{{- if not (or .Values.github.tokens .Values.github.existingSecret) -}}
+{{ fail "one of github.tokens or github.existingSecret must be set." }}
+{{- end -}}
+{{- /* Only checkable for the chart-managed Secret - an existingSecret's
+   keys aren't known at render time, so this can't validate that case. */ -}}
+{{- if .Values.github.tokens -}}
+{{- range .Values.repos -}}
+{{- if not (hasKey $.Values.github.tokens .org) -}}
+{{ fail (printf "github.tokens has no entry for org %q (used by repos[]) - add one, or set github.existingSecret to a Secret with that key instead." .org) }}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 
@@ -107,5 +142,33 @@ the .gitconfig ConfigMap to exist (fails the whole render if unset).
 {{- end -}}
 {{- if not .Values.git.email -}}
 {{ fail "git.email must be set (the commit identity used inside each agent)." }}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Validate remoteControl.permissionMode/spawn, both the top-level defaults and
+any per-repo overrides, against claude remote-control's accepted values.
+*/}}
+{{- define "cc-rc.validateRemoteControl" -}}
+{{- $permissionModes := list "acceptEdits" "auto" "bypassPermissions" "default" "dontAsk" "plan" -}}
+{{- $spawnModes := list "same-dir" "worktree" "session" -}}
+{{- if not (has .Values.remoteControl.permissionMode $permissionModes) -}}
+{{ fail (printf "remoteControl.permissionMode must be one of %s; got %q" (join ", " $permissionModes) .Values.remoteControl.permissionMode) }}
+{{- end -}}
+{{- if not (has .Values.remoteControl.spawn $spawnModes) -}}
+{{ fail (printf "remoteControl.spawn must be one of %s; got %q" (join ", " $spawnModes) .Values.remoteControl.spawn) }}
+{{- end -}}
+{{- range .Values.repos -}}
+{{- $rc := .remoteControl | default dict -}}
+{{- if $rc.permissionMode -}}
+{{- if not (has $rc.permissionMode $permissionModes) -}}
+{{ fail (printf "repos[].remoteControl.permissionMode must be one of %s; got %q" (join ", " $permissionModes) $rc.permissionMode) }}
+{{- end -}}
+{{- end -}}
+{{- if $rc.spawn -}}
+{{- if not (has $rc.spawn $spawnModes) -}}
+{{ fail (printf "repos[].remoteControl.spawn must be one of %s; got %q" (join ", " $spawnModes) $rc.spawn) }}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
