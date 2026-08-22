@@ -125,6 +125,44 @@ tests:
           path: spec.volumeClaimTemplates[1].spec.resources.requests.storage
           value: 20Gi
 
+  - it: mounts a sized emptyDir at /tmp on the agent container, using the default size
+    template: statefulset-repo.yaml
+    set:
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: tmp
+            mountPath: /tmp
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.volumes
+          content:
+            name: tmp
+            emptyDir:
+              sizeLimit: 2Gi
+
+  - it: a repo can override the /tmp emptyDir size
+    template: statefulset-repo.yaml
+    set:
+      repos:
+        - org: myorg
+          repo: myrepo
+          storage:
+            tmpSize: 500Mi
+    asserts:
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.volumes
+          content:
+            name: tmp
+            emptyDir:
+              sizeLimit: 500Mi
+
   - it: applies the default resources to the agent container when no repo override is set
     template: statefulset-repo.yaml
     set:

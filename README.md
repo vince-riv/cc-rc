@@ -8,7 +8,11 @@ in Kubernetes, one `StatefulSet` per GitHub repo, egress-restricted through a Sq
 `ghcr.io/vince-riv/cc-rc`. Built by `.github/workflows/docker-build.yml` on every push to
 `main` (`latest`, `sha-<short>`) and PR (`pr-<n>`). Ubuntu 26.04, non-root `dev` user
 (uid/gid 1000), no sudo. Ships `git`, `gh`, `screen`, `rsync`, Go 1.25/1.26, and Claude
-Code (native install, auto-update on). `WORKDIR /workspace`.
+Code (native install, auto-update on). `WORKDIR /workspace`. Also ships a baked-in
+`~/.claude/CLAUDE.md` that has every coding-task agent open a Draft PR before writing
+code and keep a progress ledger in its description, plus a `cc-rc-pr-update` helper
+(on `PATH`) that creates/updates that PR consistently — see `.claude/CLAUDE.md` and
+`scripts/cc-rc-pr-update.sh`.
 
 ## Chart
 
