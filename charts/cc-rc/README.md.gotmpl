@@ -211,15 +211,22 @@ process, since its first real run can take a few minutes to configure, and treat
 its mere appearance as "done" risks moving on before that finishes. Running
 `cc-rc-finish-login` writes the marker file; the agent then exits — the pod restarts
 (StatefulSet pods always use `restartPolicy: Always`) into steady-state mode, where
-every subsequent boot instead runs:
+every subsequent boot instead prunes stale worktrees (see below) and then runs:
 
 ```sh
 screen -L -Logfile /tmp/cc-rc-remote-control.log -dmS remote-control bash -lic 'cd /workspace/repo && claude remote-control --name <name> --permission-mode <mode> --spawn <mode> --capacity <n>'
 ```
 
-`--name` defaults to the pod's hostname (e.g. `cc-rc-myorg-myrepo-0`) unless
-`repos[].remoteControl.name` is set. `--permission-mode`, `--spawn`, `--capacity`, and
-both timeouts below come from `remoteControl.*` (global defaults) or
+(`--continue` was tried here to reattach the last-recorded session instead of always
+starting fresh, and dropped: `claude remote-control` rejects `--continue` combined with
+`--spawn`/`--capacity`, and confirmed by hand that it doesn't reattach worktree sessions
+the way we need anyway — see "Worktree pruning and orphaned-session recovery" below for
+the recovery path that does work.)
+
+`--name` defaults to the pod's hostname (e.g. `cc-rc-myorg-myrepo-0`) plus a
+`-<timestamp>` suffix, unless `repos[].remoteControl.name` is set — the suffix keeps
+each boot's session visibly distinct in claude.ai/code. `--permission-mode`, `--spawn`,
+`--capacity`, and the settings below come from `remoteControl.*` (global defaults) or
 `repos[].remoteControl.*` (per-repo override):
 
 ```yaml
@@ -229,6 +236,7 @@ remoteControl:
   capacity: 8
   unhealthyTimeoutSeconds: 45         # steady-state: how long remote-control may be down before restarting
   firstBootTimeoutSeconds: 900        # first boot: how long to wait for a human to finish /login
+  worktreeMaxAgeDays: 10              # remove .claude/worktrees/ checkouts inactive this long, on boot
 ```
 
 The container's readiness probe checks for a running `claude remote-control` process
@@ -239,6 +247,40 @@ container exits (triggering a restart) once the process has been down that long.
 Raise it (e.g. `--set remoteControl.unhealthyTimeoutSeconds=600`) to get more time to
 `kubectl exec -it <pod> -- bash` in and debug a startup failure — the tailed log and
 `screen -r remote-control` both stay attachable throughout that window.
+
+### Graceful shutdown
+
+On `SIGTERM` (pod termination — rollout, eviction, delete), the agent forwards
+`SIGINT` to any running `claude remote-control` process and waits for it to exit
+before exiting itself (confirmed `claude` exits cleanly on `SIGINT`, same as
+interactive `Ctrl-C`). This matters because a hard kill mid-write can leave a
+worktree locked. Kubernetes' default `terminationGracePeriodSeconds` (30s) is short
+for this, so the chart raises it — `terminationGracePeriodSeconds: 60` at the
+top level (not per-repo).
+
+### Worktree pruning and orphaned-session recovery ([issue #9](https://github.com/vince-riv/cc-rc/issues/9))
+
+`claude remote-control --spawn worktree` isolates each on-demand session in its own
+git worktree under `.claude/worktrees/`, and nothing removes them. On every boot,
+before starting `remote-control`, the agent removes any worktree whose transcript
+(`~/.claude/projects/.../*.jsonl`) hasn't been written to in `worktreeMaxAgeDays` days.
+
+Separately — and this is an upstream `claude remote-control` gap, not something this
+chart can fully fix (tracked in issue #9) — a worktree session whose host process
+dies (pod restart mid-conversation) becomes unreachable from claude.ai/code ("session
+not found"), even though its local transcript survives. The image ships a manual
+recovery tool for this, `rescue-sessions.sh` (not chart-delivered — baked into the
+image directly, so it works regardless of chart version):
+
+```sh
+kubectl exec -it <pod> -- rescue-sessions.sh                              # list orphaned sessions
+kubectl exec -it <pod> -- rescue-sessions.sh --rescue <bridgeSessionId>   # start a rescue screen session
+kubectl exec -it <pod> -- screen -r rescue-<bridgeSessionId>              # attach to it
+```
+`--rescue` runs `claude remote-control --session-id <bridgeSessionId>` in the
+worktree it was orphaned in, which re-registers that exact session with
+claude.ai/code. It's manual only — orphaned sessions are surfaced for a human to
+decide on, never auto-resumed on boot.
 
 ## Scheduling (nodeSelector / affinity / tolerations / PDB)
 

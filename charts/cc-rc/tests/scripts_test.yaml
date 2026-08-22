@@ -119,6 +119,9 @@ tests:
           pattern: '-ge "\$RC_FIRST_BOOT_TIMEOUT" \]; then'
       - matchRegex:
           path: data["agent-entrypoint.sh"]
+          # --continue was tried and dropped - claude remote-control
+          # rejects it combined with --spawn/--capacity, and it doesn't
+          # reattach worktree sessions anyway. Plain invocation only.
           pattern: "screen -L -Logfile \"\\$RC_LOG\" -dmS remote-control bash -lic \"cd /workspace/repo && claude remote-control --name \\$\\{NAME\\} --permission-mode \\$\\{RC_PERMISSION_MODE\\} --spawn \\$\\{RC_SPAWN\\} --capacity \\$\\{RC_CAPACITY\\}\""
       - matchRegex:
           path: data["agent-entrypoint.sh"]
@@ -130,6 +133,34 @@ tests:
           # `kubectl exec` in and debug a startup failure before the
           # container exits/restarts.
           pattern: '-ge "\$RC_UNHEALTHY_TIMEOUT" \]; then'
+
+  - it: agent-entrypoint.sh forwards SIGINT to claude remote-control on SIGTERM and waits before exiting
+    asserts:
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          pattern: "trap graceful_shutdown TERM"
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          pattern: 'kill -INT "\$pid" 2>/dev/null \|\| true'
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          pattern: '-lt "\$RC_SHUTDOWN_WAIT" \]; do'
+
+  - it: agent-entrypoint.sh prunes worktrees inactive longer than RC_WORKTREE_MAX_AGE_DAYS before starting remote-control
+    asserts:
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          pattern: "prune_stale_worktrees\\(\\) \\{"
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          pattern: 'max_age_seconds=\$\(\( RC_WORKTREE_MAX_AGE_DAYS \* 86400 \)\)'
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          pattern: "git worktree remove --force \"\\$wt\""
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          # prune_stale_worktrees runs before remote-control starts, not after.
+          pattern: "prune_stale_worktrees\\n\\n: > \"\\$RC_LOG\""
 
   - it: bash-prompt-hook.sh prints login instructions once and defines cc-rc-finish-login
     asserts:

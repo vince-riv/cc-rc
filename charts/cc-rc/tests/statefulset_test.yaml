@@ -605,16 +605,34 @@ tests:
         contains:
           path: spec.template.spec.containers[0].env
           content:
+            name: RC_WORKTREE_MAX_AGE_DAYS
+            value: "10"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RC_SHUTDOWN_WAIT
+            # terminationGracePeriodSeconds (60, chart default) minus a 5s buffer.
+            value: "55"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
             name: PROMPT_COMMAND
             value: "source /opt/cc-rc/scripts/bash-prompt-hook.sh"
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 60
 
-  - it: a repo can override remote-control name/permissionMode/spawn/capacity/unhealthyTimeoutSeconds/firstBootTimeoutSeconds independently of the chart default
+  - it: a repo can override remote-control name/permissionMode/spawn/capacity/unhealthyTimeoutSeconds/firstBootTimeoutSeconds/worktreeMaxAgeDays independently of the chart default
     template: statefulset-repo.yaml
     set:
       remoteControl:
         permissionMode: plan
         spawn: session
         capacity: 4
+      terminationGracePeriodSeconds: 120
       repos:
         - org: myorg
           repo: myrepo
@@ -623,6 +641,7 @@ tests:
             capacity: 12
             unhealthyTimeoutSeconds: 300
             firstBootTimeoutSeconds: 1800
+            worktreeMaxAgeDays: 3
     asserts:
       - documentIndex: 1
         contains:
@@ -660,6 +679,23 @@ tests:
           content:
             name: RC_FIRST_BOOT_TIMEOUT
             value: "1800"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RC_WORKTREE_MAX_AGE_DAYS
+            value: "3"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: RC_SHUTDOWN_WAIT
+            # terminationGracePeriodSeconds (120, overridden above) minus a 5s buffer.
+            value: "115"
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 120
 
   - it: fails when remoteControl.permissionMode is not a recognized value
     template: statefulset-repo.yaml

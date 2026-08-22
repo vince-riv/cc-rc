@@ -19,6 +19,7 @@
 {{- $rcCapacity := $rc.capacity | default $root.Values.remoteControl.capacity }}
 {{- $rcUnhealthyTimeout := $rc.unhealthyTimeoutSeconds | default $root.Values.remoteControl.unhealthyTimeoutSeconds }}
 {{- $rcFirstBootTimeout := $rc.firstBootTimeoutSeconds | default $root.Values.remoteControl.firstBootTimeoutSeconds }}
+{{- $rcWorktreeMaxAgeDays := $rc.worktreeMaxAgeDays | default $root.Values.remoteControl.worktreeMaxAgeDays }}
 {{- $rcName := $rc.name | default "" }}
 {{- $nodeSelector := $repoEntry.nodeSelector | default $root.Values.nodeSelector }}
 {{- $affinity := $repoEntry.affinity | default $root.Values.affinity }}
@@ -71,6 +72,7 @@ spec:
         cc-rc.io/repo: {{ $repoEntry.repo | quote }}
     spec:
       automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ $root.Values.terminationGracePeriodSeconds }}
       securityContext:
         fsGroup: {{ $root.Values.podFsGroup }}
       {{- with $nodeSelector }}
@@ -177,6 +179,13 @@ spec:
               value: {{ $rcUnhealthyTimeout | quote }}
             - name: RC_FIRST_BOOT_TIMEOUT
               value: {{ $rcFirstBootTimeout | quote }}
+            - name: RC_WORKTREE_MAX_AGE_DAYS
+              value: {{ $rcWorktreeMaxAgeDays | quote }}
+            - name: RC_SHUTDOWN_WAIT
+              # A few seconds shy of terminationGracePeriodSeconds, so the
+              # entrypoint's own bounded wait for claude to exit still
+              # finishes - and logs why - before kubelet's SIGKILL would hit.
+              value: {{ sub $root.Values.terminationGracePeriodSeconds 5 | quote }}
             # Fires on every prompt in an interactive bash shell in this
             # container (the claude-login screen session, and any ad-hoc
             # `kubectl exec -it ... -- bash`) - not just the login screen

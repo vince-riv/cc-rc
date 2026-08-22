@@ -110,6 +110,7 @@ WORKDIR /home/dev
 # config, all installed as `dev` so they land under `dev`'s home, not root's.
 RUN --mount=type=bind,source=scripts/setup-dev.sh,target=/opt/build-scripts/setup-dev.sh \
     --mount=type=bind,source=.claude/output-styles/ste100-adhd.md,target=/opt/build-scripts/ste100-adhd.md \
+    --mount=type=bind,source=charts/cc-rc/files/scripts/rescue-sessions.sh,target=/opt/build-scripts/rescue-sessions.sh \
     --mount=type=tmpfs,target=/tmp \
     bash /opt/build-scripts/setup-dev.sh
 

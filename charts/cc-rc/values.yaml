@@ -110,6 +110,7 @@ repos: []
   #     capacity: 8
   #     unhealthyTimeoutSeconds: 45
   #     firstBootTimeoutSeconds: 900
+  #     worktreeMaxAgeDays: 10
   #   nodeSelector:
   #     disktype: ssd
   #   affinity: {}
@@ -163,6 +164,16 @@ remoteControl:
   # and the pod restarts to retry. Much longer than unhealthyTimeoutSeconds
   # since it's bounding an interactive human step, not a crash.
   firstBootTimeoutSeconds: 900
+  # -- Days of inactivity (no transcript writes) before a `.claude/worktrees/`
+  # checkout is removed via `git worktree remove`. Checked once per boot,
+  # before remote-control starts.
+  worktreeMaxAgeDays: 10
+
+# -- Seconds kubelet waits after sending SIGTERM before sending SIGKILL to the
+# agent container. Raised above Kubernetes' 30s default so claude has real
+# time to exit cleanly (agent-entrypoint.sh forwards SIGINT to it on SIGTERM)
+# rather than getting killed mid-write and leaving a worktree locked.
+terminationGracePeriodSeconds: 60
 
 # -- Default container resources for the per-repo agent container. Empty means no
 # requests/limits are set.

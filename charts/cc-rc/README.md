@@ -208,15 +208,22 @@ process, since its first real run can take a few minutes to configure, and treat
 its mere appearance as "done" risks moving on before that finishes. Running
 `cc-rc-finish-login` writes the marker file; the agent then exits — the pod restarts
 (StatefulSet pods always use `restartPolicy: Always`) into steady-state mode, where
-every subsequent boot instead runs:
+every subsequent boot instead prunes stale worktrees (see below) and then runs:
 
 ```sh
 screen -L -Logfile /tmp/cc-rc-remote-control.log -dmS remote-control bash -lic 'cd /workspace/repo && claude remote-control --name <name> --permission-mode <mode> --spawn <mode> --capacity <n>'
 ```
 
-`--name` defaults to the pod's hostname (e.g. `cc-rc-myorg-myrepo-0`) unless
-`repos[].remoteControl.name` is set. `--permission-mode`, `--spawn`, `--capacity`, and
-both timeouts below come from `remoteControl.*` (global defaults) or
+(`--continue` was tried here to reattach the last-recorded session instead of always
+starting fresh, and dropped: `claude remote-control` rejects `--continue` combined with
+`--spawn`/`--capacity`, and confirmed by hand that it doesn't reattach worktree sessions
+the way we need anyway — see "Worktree pruning and orphaned-session recovery" below for
+the recovery path that does work.)
+
+`--name` defaults to the pod's hostname (e.g. `cc-rc-myorg-myrepo-0`) plus a
+`-<timestamp>` suffix, unless `repos[].remoteControl.name` is set — the suffix keeps
+each boot's session visibly distinct in claude.ai/code. `--permission-mode`, `--spawn`,
+`--capacity`, and the settings below come from `remoteControl.*` (global defaults) or
 `repos[].remoteControl.*` (per-repo override):
 
 ```yaml
@@ -226,6 +233,7 @@ remoteControl:
   capacity: 8
   unhealthyTimeoutSeconds: 45         # steady-state: how long remote-control may be down before restarting
   firstBootTimeoutSeconds: 900        # first boot: how long to wait for a human to finish /login
+  worktreeMaxAgeDays: 10              # remove .claude/worktrees/ checkouts inactive this long, on boot
 ```
 
 The container's readiness probe checks for a running `claude remote-control` process
@@ -236,6 +244,40 @@ container exits (triggering a restart) once the process has been down that long.
 Raise it (e.g. `--set remoteControl.unhealthyTimeoutSeconds=600`) to get more time to
 `kubectl exec -it <pod> -- bash` in and debug a startup failure — the tailed log and
 `screen -r remote-control` both stay attachable throughout that window.
+
+### Graceful shutdown
+
+On `SIGTERM` (pod termination — rollout, eviction, delete), the agent forwards
+`SIGINT` to any running `claude remote-control` process and waits for it to exit
+before exiting itself (confirmed `claude` exits cleanly on `SIGINT`, same as
+interactive `Ctrl-C`). This matters because a hard kill mid-write can leave a
+worktree locked. Kubernetes' default `terminationGracePeriodSeconds` (30s) is short
+for this, so the chart raises it — `terminationGracePeriodSeconds: 60` at the
+top level (not per-repo).
+
+### Worktree pruning and orphaned-session recovery ([issue #9](https://github.com/vince-riv/cc-rc/issues/9))
+
+`claude remote-control --spawn worktree` isolates each on-demand session in its own
+git worktree under `.claude/worktrees/`, and nothing removes them. On every boot,
+before starting `remote-control`, the agent removes any worktree whose transcript
+(`~/.claude/projects/.../*.jsonl`) hasn't been written to in `worktreeMaxAgeDays` days.
+
+Separately — and this is an upstream `claude remote-control` gap, not something this
+chart can fully fix (tracked in issue #9) — a worktree session whose host process
+dies (pod restart mid-conversation) becomes unreachable from claude.ai/code ("session
+not found"), even though its local transcript survives. The image ships a manual
+recovery tool for this, `rescue-sessions.sh` (not chart-delivered — baked into the
+image directly, so it works regardless of chart version):
+
+```sh
+kubectl exec -it <pod> -- rescue-sessions.sh                              # list orphaned sessions
+kubectl exec -it <pod> -- rescue-sessions.sh --rescue <bridgeSessionId>   # start a rescue screen session
+kubectl exec -it <pod> -- screen -r rescue-<bridgeSessionId>              # attach to it
+```
+`--rescue` runs `claude remote-control --session-id <bridgeSessionId>` in the
+worktree it was orphaned in, which re-registers that exact session with
+claude.ai/code. It's manual only — orphaned sessions are surfaced for a human to
+decide on, never auto-resumed on boot.
 
 ## Scheduling (nodeSelector / affinity / tolerations / PDB)
 
@@ -317,9 +359,10 @@ Pebble entrypoint relay that to its own stdout (otherwise it's only visible via
 | proxy.probes.quiet | bool | `true` | When true (default), readiness/liveness probes check for a LISTEN socket via /proc/net/tcp[6] instead of connecting - squid can't log a connection it never saw, so this keeps NONE_NONE/000 error:transaction-end-before-headers noise out of the access log. This is a weaker check than tcpSocket: it confirms squid is listening, not that it's actually accepting connections. Set to false to use tcpSocket instead, at the cost of that log noise on every probe. |
 | proxy.revisionHistoryLimit | int | `5` | Number of old ReplicaSets to keep for rollback (Deployment's revisionHistoryLimit). |
 | proxy.tolerations | list | `[]` | tolerations for the squid Deployment. |
-| remoteControl | object | `{"capacity":8,"firstBootTimeoutSeconds":900,"permissionMode":"bypassPermissions","spawn":"worktree","unhealthyTimeoutSeconds":45}` | Defaults for the `claude remote-control` invocation each agent runs once login is complete (see the seed-home/clone-repo init containers and the agent container's startup logic). Any of these can be overridden per-repo via `repos[].remoteControl`. |
+| remoteControl | object | `{"capacity":8,"firstBootTimeoutSeconds":900,"permissionMode":"bypassPermissions","spawn":"worktree","unhealthyTimeoutSeconds":45,"worktreeMaxAgeDays":10}` | Defaults for the `claude remote-control` invocation each agent runs once login is complete (see the seed-home/clone-repo init containers and the agent container's startup logic). Any of these can be overridden per-repo via `repos[].remoteControl`. |
 | remoteControl.firstBootTimeoutSeconds | int | `900` | Seconds to wait, on first boot (no login-complete marker yet), for a human to finish `claude`'s /login flow before the agent container exits and the pod restarts to retry. Much longer than unhealthyTimeoutSeconds since it's bounding an interactive human step, not a crash. |
 | remoteControl.unhealthyTimeoutSeconds | int | `45` | Seconds `claude remote-control` may be down (never started, or crashed) before the agent container exits, restarting the pod. Kept fairly short by default so a genuine crash self-heals promptly; raise it (e.g. via --set) while debugging a startup failure, since it's also the window you have to `kubectl exec` in and inspect before the container cycles. |
+| remoteControl.worktreeMaxAgeDays | int | `10` | Days of inactivity (no transcript writes) before a `.claude/worktrees/` checkout is removed via `git worktree remove`. Checked once per boot, before remote-control starts. |
 | repos | list | `[]` | One StatefulSet is created per entry. `org`/`repo` are the GitHub org and repo name. Optional per-entry `resources`, `storage`, and `remoteControl` override the defaults below. `resources` is deep-merged over the top-level `resources` default, so a repo can override just cpu or just memory without having to repeat the other. `nodeSelector`/`affinity`, if set, fully replace (not merge with) the top-level `nodeSelector`/`affinity` defaults for that repo's StatefulSet. |
 | resources | object | `{}` | Default container resources for the per-repo agent container. Empty means no requests/limits are set. |
 | revisionHistoryLimit | int | `5` | Number of old ControllerRevisions to keep for rollback (StatefulSet's revisionHistoryLimit) for each per-repo agent StatefulSet. |
@@ -333,6 +376,7 @@ Pebble entrypoint relay that to its own stdout (otherwise it's only visible via
 | storage.homeSize | string | `"5Gi"` | Size of the PVC mounted at /home/dev (the dev user's entire home directory — claude config/credentials, shell history, etc. — not just ~/.claude). |
 | storage.storageClassName | string | `""` | StorageClass for both PVCs. "" uses the cluster default. |
 | storage.workspaceSize | string | `"5Gi"` | Size of the PVC mounted at /workspace |
+| terminationGracePeriodSeconds | int | `60` | Seconds kubelet waits after sending SIGTERM before sending SIGKILL to the agent container. Raised above Kubernetes' 30s default so claude has real time to exit cleanly (agent-entrypoint.sh forwards SIGINT to it on SIGTERM) rather than getting killed mid-write and leaving a worktree locked. |
 | tolerations | list | `[]` | Default tolerations for every per-repo agent StatefulSet. Override per-repo via `repos[].tolerations` (full replace, not merged with this default). |
 
 ## Rendering and testing locally

@@ -5,6 +5,10 @@ set -euo pipefail
 curl -fsSL https://claude.ai/install.sh | bash
 "$HOME/.local/bin/claude" --version
 
+# Manual session-recovery tool (see charts/cc-rc/files/scripts/rescue-sessions.sh
+# for what it does and why it's baked into the image instead of chart-delivered).
+install -m 755 /opt/build-scripts/rescue-sessions.sh "$HOME/.local/bin/rescue-sessions.sh"
+
 # helm unittest plugin. --verify=false: no published provenance.
 # https://github.com/helm-unittest/helm-unittest/issues/777
 helm plugin install https://github.com/helm-unittest/helm-unittest --verify=false
