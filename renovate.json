@@ -9,7 +9,9 @@
   "customManagers": [
     {
       "customType": "regex",
-      "fileMatch": ["(^|/)scripts/.*\\.sh$"],
+      "managerFilePatterns": [
+        "/(^|/)scripts/.*\\.sh$/"
+      ],
       "matchStrings": [
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+\\S+_VERSION=(?<currentValue>\\S+)"
       ]
