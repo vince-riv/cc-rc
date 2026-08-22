@@ -44,7 +44,12 @@ cc-rc-pr-update \
 ```
 
 - `--title`: the PR title. Conventional Commits format, same as commits.
-- `--summary-file`: 1-3 sentences on what this task is and why.
+- `--summary-file`: follow this repo's own rules for what a PR
+  description/summary should contain, if it defines any — check for a PR
+  template (e.g. `.github/PULL_REQUEST_TEMPLATE.md`), contributing docs, or
+  an agent skill covering PR summaries, and use that format/content. If the
+  repo defines none of these, fall back to 1-3 sentences on what the task
+  is and why.
 - `--plan-file`: a verbatim copy of the plan you intend to follow (from
   plan mode, or a short step list you write yourself if there was no
   separate planning step).
