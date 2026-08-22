@@ -98,7 +98,7 @@ ${plan}
 
 </details>
 
-<details open>
+<details>
 <summary>Progress ledger (for a resuming agent)</summary>
 
 ${ledger}

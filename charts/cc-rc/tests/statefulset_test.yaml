@@ -144,7 +144,7 @@ tests:
           content:
             name: tmp
             emptyDir:
-              sizeLimit: 1Gi
+              sizeLimit: 2Gi
 
   - it: a repo can override the /tmp emptyDir size
     template: statefulset-repo.yaml

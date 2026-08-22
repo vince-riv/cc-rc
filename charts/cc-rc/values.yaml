@@ -103,7 +103,7 @@ repos: []
   #   storage:
   #     homeSize: 500Mi
   #     workspaceSize: 5Gi
-  #     tmpSize: 1Gi
+  #     tmpSize: 2Gi
   #   remoteControl:
   #     name: myorg-myrepo          # defaults to the pod hostname when unset
   #     permissionMode: bypassPermissions
@@ -144,7 +144,7 @@ storage:
   storageClassName: ""
   # -- sizeLimit of the emptyDir mounted at /tmp on the agent container (e.g. for
   # cc-rc-pr-update's PR summary/plan/ledger drafts).
-  tmpSize: 1Gi
+  tmpSize: 2Gi
 
 # -- Defaults for the `claude remote-control` invocation each agent runs once login
 # is complete (see the seed-home/clone-repo init containers and the agent container's

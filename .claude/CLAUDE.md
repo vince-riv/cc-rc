@@ -11,10 +11,13 @@ It does not change how you write chat replies — that's the separate
 
 ## 1. Before writing any code
 
-1. If you're not already on a task-specific branch, create one from the
-   default branch. Name it `<type>/<short-description>`, using a
-   Conventional Commits type — e.g. `feat/add-retry-logic`,
-   `fix/null-pointer-in-parser`.
+1. Fetch first: `git fetch origin`. If you're not already on a
+   task-specific branch, create one from a fresh `origin/<default-branch>`
+   — e.g. `git checkout -b <branch> origin/main` — not from whatever a
+   local checkout happens to have, which can be stale. Name the branch
+   `<type>/<short-description>`, using a Conventional Commits type — e.g.
+   `feat/add-retry-logic`, `fix/null-pointer-in-parser`. Branching from a
+   stale base is a common cause of avoidable merge conflicts later.
 2. Push it immediately, even with no commits yet:
    `git push -u origin <branch>`. This confirms push access works before
    you rely on it later.
@@ -53,8 +56,22 @@ of a file. Re-running the command regenerates the whole PR body from the
 three inputs every time — always pass all three, even when only the ledger
 changed, so the sections never drift out of the template.
 
+The Plan and Progress ledger sections both render **collapsed** (`<details>`,
+not `<details open>`) — the summary above them should be enough to read at a
+glance; expand either only when you actually need the detail.
+
 First call with no PR open yet for this branch creates a **Draft PR**.
 Later calls edit that same PR in place.
+
+**Writing the section files:** GitHub renders a single `\n` inside a PR/
+issue body as a literal line break, not as a space like most Markdown
+renderers — so a hard-wrapped paragraph (each sentence or clause on its own
+line, as you might write in a text editor) shows up as choppy, broken
+lines instead of flowing prose. Write each paragraph in `--summary-file`/
+`--plan-file`/`--ledger-file` as a single unwrapped line, and separate
+paragraphs only with a blank line. Markdown lists/headings are unaffected —
+keep those on their own lines as normal, since that line-per-item structure
+is what you want rendered anyway.
 
 ## 3. While working
 
