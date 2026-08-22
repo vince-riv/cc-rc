@@ -12,6 +12,7 @@
 {{- $name := printf "%s-%s" (include "cc-rc.fullname" $root) $slug }}
 {{- $homeSize := ($repoEntry.storage).homeSize | default $root.Values.storage.homeSize }}
 {{- $workspaceSize := ($repoEntry.storage).workspaceSize | default $root.Values.storage.workspaceSize }}
+{{- $tmpSize := ($repoEntry.storage).tmpSize | default $root.Values.storage.tmpSize }}
 {{- $resources := mergeOverwrite (deepCopy $root.Values.resources) ($repoEntry.resources | default dict) }}
 {{- $rc := $repoEntry.remoteControl | default dict }}
 {{- $rcPermissionMode := $rc.permissionMode | default $root.Values.remoteControl.permissionMode }}
@@ -214,6 +215,8 @@ spec:
               subPath: .gitignore_global
             - name: scripts
               mountPath: /opt/cc-rc/scripts
+            - name: tmp
+              mountPath: /tmp
           {{- with $resources }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -228,6 +231,9 @@ spec:
         - name: scripts
           configMap:
             name: {{ include "cc-rc.fullname" $root }}-scripts
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ $tmpSize }}
   volumeClaimTemplates:
     - apiVersion: v1
       kind: PersistentVolumeClaim
