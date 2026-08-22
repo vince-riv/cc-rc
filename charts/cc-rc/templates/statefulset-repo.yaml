@@ -152,7 +152,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ include "cc-rc.githubSecretName" $root }}
-                  key: {{ include "cc-rc.githubSecretKey" $root }}
+                  key: {{ $repoEntry.org }}
             - name: HTTP_PROXY
               value: {{ $proxyURL | quote }}
             - name: HTTPS_PROXY

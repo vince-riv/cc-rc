@@ -13,8 +13,8 @@ repo, each behind a locked-down [Squid](https://www.squid-cache.org/) egress pro
   list / default-blocked cluster-internal ranges). This is the only workload in the
   chart with unrestricted egress.
 - A pre-install/pre-upgrade hook `Job` (see "SSH deploy key" below) that generates an
-  ED25519 key and registers it against the GitHub account behind `github.token`/
-  `github.existingSecret`, storing it in a `Secret`.
+  ED25519 key and registers it against a GitHub account using one org's PAT (see
+  "Configuring GitHub auth" below), storing it in a `Secret`.
 - One `StatefulSet` (replicas: 1) per entry in `values.repos`, running the
   `ghcr.io/vince-riv/cc-rc` image. Each gets:
   - a 5Gi PVC mounted at `/home/dev` — the `dev` user's entire home directory, not
@@ -36,7 +36,8 @@ repo, each behind a locked-down [Squid](https://www.squid-cache.org/) egress pro
   - a `clone-repo` init container that clones the repo, over SSH, into
     `/workspace/repo` (skipped if already cloned)
   - `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` (+ lowercase variants) pointed at the Squid
-    `Service`, and `GH_TOKEN` from a `Secret`
+    `Service`, and `GH_TOKEN` from the `Secret` key matching this StatefulSet's own
+    `repos[].org`
   - a startup script that runs `claude` in a `screen` session: see
     "Claude login and remote-control" below
 - A `NetworkPolicy` that denies all egress from the agent `StatefulSet` pods except to
@@ -62,7 +63,7 @@ OCI artifact:
 ```sh
 helm install cc-rc oci://ghcr.io/vince-riv/charts/cc-rc --version 0.1.0 \
   --set repos[0].org=myorg --set repos[0].repo=myrepo \
-  --set github.token=ghp_... \
+  --set github.tokens.myorg=ghp_... \
   --set git.name="CI Bot" --set git.email=ci@example.com
 ```
 
@@ -74,22 +75,38 @@ helm repo add cc-rc https://vince-riv.github.io/cc-rc/
 helm repo update
 helm install cc-rc cc-rc/cc-rc --version 0.1.0 \
   --set repos[0].org=myorg --set repos[0].repo=myrepo \
-  --set github.token=ghp_... \
+  --set github.tokens.myorg=ghp_... \
   --set git.name="CI Bot" --set git.email=ci@example.com
 ```
 
 ## Configuring GitHub auth
 
-Set exactly one of:
+GitHub PATs are scoped to a single org and/or user, so one flat token rarely covers
+every `repos[]` entry — each per-repo agent's `GH_TOKEN` comes from the key matching
+its own `repos[].org`, within one shared Secret. Set exactly one of:
 
 ```yaml
 github:
-  token: "ghp_..."          # chart creates a Secret for you
+  tokens:                    # chart creates a Secret for you, one key per org
+    myorg: "ghp_..."
+    otherorg: "ghp_..."
 # or
 github:
-  existingSecret: "my-secret"
-  existingSecretKey: "token"  # defaults to "token"
+  existingSecret: "my-secret"  # holds the same shape: one key per org, key == org name
 ```
+
+For anything beyond quick testing, prefer `existingSecret` together with
+`scripts/manage-github-tokens.sh` (run from your own machine, needs `kubectl` access) —
+it keeps every PAT out of `values.yaml`/git entirely. It prompts for a PAT per org,
+pre-filled with that org's current value if the Secret already has one (so adding a new
+org, or rotating one, never means re-typing every other org's PAT), then
+`kubectl apply --server-side`s the merged result in one shot:
+
+```sh
+scripts/manage-github-tokens.sh -n my-namespace -s my-secret myorg otherorg
+```
+
+Run it with no `ORG` arguments to be prompted for org names interactively instead.
 
 ## Configuring per-repo resources
 
@@ -134,7 +151,10 @@ the release. A pre-install/pre-upgrade hook `Job` (`create-ssh-key.sh`, run as t
    idempotent across every `helm install`/`upgrade`.
 2. `ssh-keygen -t ed25519` a fresh key pair.
 3. `gh api /user/keys` to register the public half against the GitHub account behind
-   `GH_TOKEN` (that token needs the `write:public_key` scope), titled `sshKey.keyTitle`.
+   `sshKey.tokenOrg`'s PAT (defaults to `repos[0].org`'s; that token needs the
+   `write:public_key` scope), titled `sshKey.keyTitle`. SSH keys are account-level, not
+   org-scoped, so this one key is shared by every `repos[]` entry — `tokenOrg` only
+   needs to name an org whose PAT belongs to an account that can reach all of them.
 4. `kubectl create secret generic sshKey.secretName` holding both halves. If this step
    fails, the just-added GitHub key is deleted again (`gh api -X DELETE /user/keys/<id>`)
    so a retry doesn't pile up orphaned keys on the account — the public key only stays
@@ -274,12 +294,10 @@ Pebble entrypoint relay that to its own stdout (otherwise it's only visible via
 | git.logDecorate | string | `"short"` | log.decorate |
 | git.name | string | `""` | Commit author name. Required. |
 | git.pushDefault | string | `"upstream"` | push.default |
-| github | object | `{"existingSecret":"","existingSecretKey":"token","secretKey":"token","secretName":"","token":""}` | GitHub auth for cloning repos and for the `gh`/`git` CLIs inside each agent. Set EXACTLY ONE of `token` or `existingSecret`. |
-| github.existingSecret | string | `""` | Name of a pre-existing Secret to use instead of `token`. Mutually exclusive with `token`. |
-| github.existingSecretKey | string | `"token"` | Key within `existingSecret` that holds the token. |
-| github.secretKey | string | `"token"` | Key used inside the chart-managed Secret. |
-| github.secretName | string | `""` | Name of the Secret the chart creates when `token` is set. Defaults to "<release>-cc-rc-github-token" when left empty. |
-| github.token | string | `""` | Set this to a GitHub PAT to have the chart create a Secret for you. |
+| github | object | `{"existingSecret":"","secretName":"","tokens":{}}` | GitHub auth for cloning repos and for the `gh`/`git` CLIs inside each agent. One GitHub PAT per org - GitHub PATs are scoped to a single org and/or user, so a single flat token rarely covers every repos[] entry. Every per-repo agent's GH_TOKEN comes from the key matching ITS OWN repos[].org within one Secret. Set EXACTLY ONE of `tokens` or `existingSecret`. |
+| github.existingSecret | string | `""` | Name of a pre-existing Secret to use instead of `tokens`, holding one key per org (key name == org name, matching repos[].org) - see `scripts/manage-github-tokens.sh`. Mutually exclusive with `tokens`. |
+| github.secretName | string | `""` | Name of the Secret the chart creates when `tokens` is set. Defaults to "<release>-cc-rc-github-tokens" when left empty. |
+| github.tokens | object | `{}` | Map of org name -> GitHub PAT. Chart creates a Secret from this map (one key per org, keyed by org name) if set. Fine for quick testing, but for anything long-lived prefer `existingSecret` plus `scripts/manage-github-tokens.sh`, which keeps tokens out of values.yaml/git entirely. |
 | image | object | `{"pullPolicy":"Always","repository":"ghcr.io/vince-riv/cc-rc","tag":"latest"}` | Image for the per-repo agent StatefulSets |
 | networkPolicy | object | `{"dns":{"namespace":"kube-system","podSelector":{"k8s-app":"kube-dns"},"port":53},"enabled":true}` | NetworkPolicy that denies all egress from per-repo agent pods except to the squid proxy Service and to cluster DNS. Never applied to the squid Deployment's own pods, which keep unrestricted egress. |
 | networkPolicy.dns.namespace | string | `"kube-system"` | Namespace running the cluster's DNS resolver. |
@@ -305,11 +323,12 @@ Pebble entrypoint relay that to its own stdout (otherwise it's only visible via
 | repos | list | `[]` | One StatefulSet is created per entry. `org`/`repo` are the GitHub org and repo name. Optional per-entry `resources`, `storage`, and `remoteControl` override the defaults below. `resources` is deep-merged over the top-level `resources` default, so a repo can override just cpu or just memory without having to repeat the other. `nodeSelector`/`affinity`, if set, fully replace (not merge with) the top-level `nodeSelector`/`affinity` defaults for that repo's StatefulSet. |
 | resources | object | `{}` | Default container resources for the per-repo agent container. Empty means no requests/limits are set. |
 | revisionHistoryLimit | int | `5` | Number of old ControllerRevisions to keep for rollback (StatefulSet's revisionHistoryLimit) for each per-repo agent StatefulSet. |
-| sshKey | object | `{"enabled":true,"keyTitle":"cc-rc","resources":{},"secretName":""}` | ED25519 SSH deploy key, generated once by a pre-install/pre-upgrade hook Job and added to the GitHub account that owns `github.token`/ `github.existingSecret`'s token (via `gh api /user/keys` - that token needs the `write:public_key` scope). Every per-repo agent then clones/pushes over SSH using this key instead of an HTTPS URL with an embedded token. |
+| sshKey | object | `{"enabled":true,"keyTitle":"cc-rc","resources":{},"secretName":"","tokenOrg":""}` | ED25519 SSH deploy key, generated once by a pre-install/pre-upgrade hook Job and added to a GitHub account (via `gh api /user/keys` - that account's PAT needs the `write:public_key` scope). Every per-repo agent then clones/pushes over SSH using this key instead of an HTTPS URL with an embedded token. SSH keys are account-level, not org-scoped, so ONE key is generated and shared across every repos[] entry - it just needs registering with a token from an account that can reach all of them. |
 | sshKey.enabled | bool | `true` | Set false to skip the key-generation Job (e.g. you manage `secretName` yourself out of band). Per-repo agents always clone over SSH and expect `secretName` to hold `id_ed25519`/`id_ed25519.pub` either way. |
 | sshKey.keyTitle | string | `"cc-rc"` | Title shown for this key under the GitHub account's SSH keys settings. |
 | sshKey.resources | object | `{}` | Container resources for the key-generation Job. |
 | sshKey.secretName | string | `""` | Name of the Secret holding the generated key. The Job creates it only if it doesn't already exist, and is a no-op otherwise. Defaults to "<release>-cc-rc-ssh-key" when left empty. |
+| sshKey.tokenOrg | string | `""` | Which org's PAT (a key in the github Secret) to use when registering the deploy key. Defaults to repos[0].org when left empty - only matters if your orgs' tokens belong to different GitHub accounts, since the "right" one has to be able to see every repo you want the shared key to reach. |
 | storage | object | `{"homeSize":"5Gi","storageClassName":"","workspaceSize":"5Gi"}` | Default persistent volume sizes for each per-repo agent. |
 | storage.homeSize | string | `"5Gi"` | Size of the PVC mounted at /home/dev (the dev user's entire home directory — claude config/credentials, shell history, etc. — not just ~/.claude). |
 | storage.storageClassName | string | `""` | StorageClass for both PVCs. "" uses the cluster default. |
@@ -322,7 +341,7 @@ Pebble entrypoint relay that to its own stdout (otherwise it's only visible via
 helm lint charts/cc-rc
 helm template cc-rc charts/cc-rc \
   --set repos[0].org=myorg --set repos[0].repo=myrepo \
-  --set github.token=dummy \
+  --set github.tokens.myorg=dummy \
   --set git.name="CI Bot" --set git.email=ci@example.com
 helm unittest charts/cc-rc
 ```

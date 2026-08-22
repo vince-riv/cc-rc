@@ -5,25 +5,34 @@ image:
   pullPolicy: Always
 
 # -- GitHub auth for cloning repos and for the `gh`/`git` CLIs inside each agent.
-# Set EXACTLY ONE of `token` or `existingSecret`.
+# One GitHub PAT per org - GitHub PATs are scoped to a single org and/or user, so a
+# single flat token rarely covers every repos[] entry. Every per-repo agent's GH_TOKEN
+# comes from the key matching ITS OWN repos[].org within one Secret. Set EXACTLY ONE of
+# `tokens` or `existingSecret`.
 github:
-  # -- Set this to a GitHub PAT to have the chart create a Secret for you.
-  token: ""
-  # -- Name of a pre-existing Secret to use instead of `token`. Mutually exclusive with `token`.
-  existingSecret: ""
-  # -- Key within `existingSecret` that holds the token.
-  existingSecretKey: "token"
-  # -- Name of the Secret the chart creates when `token` is set. Defaults to
-  # "<release>-cc-rc-github-token" when left empty.
-  secretName: ""
-  # -- Key used inside the chart-managed Secret.
-  secretKey: "token"
+  # -- Map of org name -> GitHub PAT. Chart creates a Secret from this map (one key per
+  # org, keyed by org name) if set. Fine for quick testing, but for anything long-lived
+  # prefer `existingSecret` plus `scripts/manage-github-tokens.sh`, which keeps tokens
+  # out of values.yaml/git entirely.
+  tokens: {}
+  # tokens:
+  #   myorg: ghp_...
+  #   otherorg: ghp_...
 
-# -- ED25519 SSH deploy key, generated once by a pre-install/pre-upgrade hook
-# Job and added to the GitHub account that owns `github.token`/
-# `github.existingSecret`'s token (via `gh api /user/keys` - that token needs
-# the `write:public_key` scope). Every per-repo agent then clones/pushes over
-# SSH using this key instead of an HTTPS URL with an embedded token.
+  # -- Name of a pre-existing Secret to use instead of `tokens`, holding one key per org
+  # (key name == org name, matching repos[].org) - see `scripts/manage-github-tokens.sh`.
+  # Mutually exclusive with `tokens`.
+  existingSecret: ""
+  # -- Name of the Secret the chart creates when `tokens` is set. Defaults to
+  # "<release>-cc-rc-github-tokens" when left empty.
+  secretName: ""
+
+# -- ED25519 SSH deploy key, generated once by a pre-install/pre-upgrade hook Job and
+# added to a GitHub account (via `gh api /user/keys` - that account's PAT needs the
+# `write:public_key` scope). Every per-repo agent then clones/pushes over SSH using this
+# key instead of an HTTPS URL with an embedded token. SSH keys are account-level, not
+# org-scoped, so ONE key is generated and shared across every repos[] entry - it just
+# needs registering with a token from an account that can reach all of them.
 sshKey:
   # -- Set false to skip the key-generation Job (e.g. you manage `secretName`
   # yourself out of band). Per-repo agents always clone over SSH and expect
@@ -35,6 +44,11 @@ sshKey:
   secretName: ""
   # -- Title shown for this key under the GitHub account's SSH keys settings.
   keyTitle: "cc-rc"
+  # -- Which org's PAT (a key in the github Secret) to use when registering the deploy
+  # key. Defaults to repos[0].org when left empty - only matters if your orgs' tokens
+  # belong to different GitHub accounts, since the "right" one has to be able to see
+  # every repo you want the shared key to reach.
+  tokenOrg: ""
   # -- Container resources for the key-generation Job.
   resources: {}
 

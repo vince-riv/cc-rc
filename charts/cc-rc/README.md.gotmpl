@@ -16,8 +16,8 @@ repo, each behind a locked-down [Squid](https://www.squid-cache.org/) egress pro
   list / default-blocked cluster-internal ranges). This is the only workload in the
   chart with unrestricted egress.
 - A pre-install/pre-upgrade hook `Job` (see "SSH deploy key" below) that generates an
-  ED25519 key and registers it against the GitHub account behind `github.token`/
-  `github.existingSecret`, storing it in a `Secret`.
+  ED25519 key and registers it against a GitHub account using one org's PAT (see
+  "Configuring GitHub auth" below), storing it in a `Secret`.
 - One `StatefulSet` (replicas: 1) per entry in `values.repos`, running the
   `ghcr.io/vince-riv/cc-rc` image. Each gets:
   - a 5Gi PVC mounted at `/home/dev` — the `dev` user's entire home directory, not
@@ -39,7 +39,8 @@ repo, each behind a locked-down [Squid](https://www.squid-cache.org/) egress pro
   - a `clone-repo` init container that clones the repo, over SSH, into
     `/workspace/repo` (skipped if already cloned)
   - `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` (+ lowercase variants) pointed at the Squid
-    `Service`, and `GH_TOKEN` from a `Secret`
+    `Service`, and `GH_TOKEN` from the `Secret` key matching this StatefulSet's own
+    `repos[].org`
   - a startup script that runs `claude` in a `screen` session: see
     "Claude login and remote-control" below
 - A `NetworkPolicy` that denies all egress from the agent `StatefulSet` pods except to
@@ -65,7 +66,7 @@ OCI artifact:
 ```sh
 helm install cc-rc oci://ghcr.io/vince-riv/charts/cc-rc --version 0.1.0 \
   --set repos[0].org=myorg --set repos[0].repo=myrepo \
-  --set github.token=ghp_... \
+  --set github.tokens.myorg=ghp_... \
   --set git.name="CI Bot" --set git.email=ci@example.com
 ```
 
@@ -77,22 +78,38 @@ helm repo add cc-rc https://vince-riv.github.io/cc-rc/
 helm repo update
 helm install cc-rc cc-rc/cc-rc --version 0.1.0 \
   --set repos[0].org=myorg --set repos[0].repo=myrepo \
-  --set github.token=ghp_... \
+  --set github.tokens.myorg=ghp_... \
   --set git.name="CI Bot" --set git.email=ci@example.com
 ```
 
 ## Configuring GitHub auth
 
-Set exactly one of:
+GitHub PATs are scoped to a single org and/or user, so one flat token rarely covers
+every `repos[]` entry — each per-repo agent's `GH_TOKEN` comes from the key matching
+its own `repos[].org`, within one shared Secret. Set exactly one of:
 
 ```yaml
 github:
-  token: "ghp_..."          # chart creates a Secret for you
+  tokens:                    # chart creates a Secret for you, one key per org
+    myorg: "ghp_..."
+    otherorg: "ghp_..."
 # or
 github:
-  existingSecret: "my-secret"
-  existingSecretKey: "token"  # defaults to "token"
+  existingSecret: "my-secret"  # holds the same shape: one key per org, key == org name
 ```
+
+For anything beyond quick testing, prefer `existingSecret` together with
+`scripts/manage-github-tokens.sh` (run from your own machine, needs `kubectl` access) —
+it keeps every PAT out of `values.yaml`/git entirely. It prompts for a PAT per org,
+pre-filled with that org's current value if the Secret already has one (so adding a new
+org, or rotating one, never means re-typing every other org's PAT), then
+`kubectl apply --server-side`s the merged result in one shot:
+
+```sh
+scripts/manage-github-tokens.sh -n my-namespace -s my-secret myorg otherorg
+```
+
+Run it with no `ORG` arguments to be prompted for org names interactively instead.
 
 ## Configuring per-repo resources
 
@@ -137,7 +154,10 @@ the release. A pre-install/pre-upgrade hook `Job` (`create-ssh-key.sh`, run as t
    idempotent across every `helm install`/`upgrade`.
 2. `ssh-keygen -t ed25519` a fresh key pair.
 3. `gh api /user/keys` to register the public half against the GitHub account behind
-   `GH_TOKEN` (that token needs the `write:public_key` scope), titled `sshKey.keyTitle`.
+   `sshKey.tokenOrg`'s PAT (defaults to `repos[0].org`'s; that token needs the
+   `write:public_key` scope), titled `sshKey.keyTitle`. SSH keys are account-level, not
+   org-scoped, so this one key is shared by every `repos[]` entry — `tokenOrg` only
+   needs to name an org whose PAT belongs to an account that can reach all of them.
 4. `kubectl create secret generic sshKey.secretName` holding both halves. If this step
    fails, the just-added GitHub key is deleted again (`gh api -X DELETE /user/keys/<id>`)
    so a retry doesn't pile up orphaned keys on the account — the public key only stays
@@ -278,7 +298,7 @@ Pebble entrypoint relay that to its own stdout (otherwise it's only visible via
 helm lint charts/cc-rc
 helm template cc-rc charts/cc-rc \
   --set repos[0].org=myorg --set repos[0].repo=myrepo \
-  --set github.token=dummy \
+  --set github.tokens.myorg=dummy \
   --set git.name="CI Bot" --set git.email=ci@example.com
 helm unittest charts/cc-rc
 ```

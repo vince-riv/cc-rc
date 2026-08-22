@@ -1,5 +1,8 @@
 {{- include "cc-rc.validateGithubAuth" . -}}
 {{- if .Values.sshKey.enabled }}
+{{- if and (not .Values.sshKey.tokenOrg) (not .Values.repos) -}}
+{{ fail "sshKey.tokenOrg must be set when repos is empty (there's no repos[0].org to default it to)." }}
+{{- end -}}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -94,7 +97,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ include "cc-rc.githubSecretName" . }}
-                  key: {{ include "cc-rc.githubSecretKey" . }}
+                  key: {{ include "cc-rc.sshKeyTokenOrg" . }}
           volumeMounts:
             - name: scripts
               mountPath: /opt/cc-rc/scripts

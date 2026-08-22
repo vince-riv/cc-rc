@@ -2,7 +2,9 @@ suite: dev gitconfig (happy path)
 templates:
   - configmap-gitconfig.yaml
 set:
-  github.token: dummy-token
+  github:
+    tokens:
+      myorg: dummy-token
   git:
     name: CI Bot
     email: ci@example.com

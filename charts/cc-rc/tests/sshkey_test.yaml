@@ -2,7 +2,9 @@ suite: SSH key generation Job (happy path)
 templates:
   - job-ssh-key.yaml
 set:
-  github.token: dummy-token
+  github:
+    tokens:
+      myorg: dummy-token
   git:
     name: CI Bot
     email: ci@example.com
@@ -81,8 +83,8 @@ tests:
             name: GH_TOKEN
             valueFrom:
               secretKeyRef:
-                name: RELEASE-NAME-cc-rc-github-token
-                key: token
+                name: RELEASE-NAME-cc-rc-github-tokens
+                key: myorg
       - documentIndex: 3
         contains:
           path: spec.template.spec.containers[0].env
@@ -123,3 +125,59 @@ tests:
     asserts:
       - hasDocuments:
           count: 0
+
+  - it: defaults the registering org to repos[0].org when multiple repos/orgs are configured
+    set:
+      github:
+        tokens:
+          myorg: dummy-token
+          otherorg: other-token
+      repos:
+        - org: myorg
+          repo: myrepo
+        - org: otherorg
+          repo: otherrepo
+    asserts:
+      - documentIndex: 3
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GH_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: RELEASE-NAME-cc-rc-github-tokens
+                key: myorg
+
+  - it: sshKey.tokenOrg overrides which org's PAT registers the key
+    set:
+      github:
+        tokens:
+          myorg: dummy-token
+          otherorg: other-token
+      repos:
+        - org: myorg
+          repo: myrepo
+        - org: otherorg
+          repo: otherrepo
+      sshKey:
+        tokenOrg: otherorg
+    asserts:
+      - documentIndex: 3
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GH_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: RELEASE-NAME-cc-rc-github-tokens
+                key: otherorg
+
+  - it: fails when repos is empty and sshKey.tokenOrg is unset
+    set:
+      github:
+        tokens: null
+        existingSecret: some-secret
+      repos: []
+    asserts:
+      - failedTemplate:
+          errorMessageRegex: "sshKey.tokenOrg must be set when repos is empty"

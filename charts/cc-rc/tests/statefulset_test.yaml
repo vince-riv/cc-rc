@@ -3,7 +3,14 @@ templates:
   - statefulset-repo.yaml
   - configmap-scripts.yaml
 set:
-  github.token: dummy-token
+  # Covers every org used across this file's individual tests' repos[]
+  # overrides (github.tokens must have an entry for each).
+  github:
+    tokens:
+      MyOrg: dummy-token
+      myorg: dummy-token
+      alpha: dummy-token
+      beta: dummy-token
   git:
     name: CI Bot
     email: ci@example.com
@@ -214,11 +221,11 @@ tests:
       - documentIndex: 1
         equal:
           path: spec.template.spec.containers[0].env[0].valueFrom.secretKeyRef.name
-          value: RELEASE-NAME-cc-rc-github-token
+          value: RELEASE-NAME-cc-rc-github-tokens
       - documentIndex: 1
         equal:
           path: spec.template.spec.containers[0].env[0].valueFrom.secretKeyRef.key
-          value: token
+          value: myorg
       - documentIndex: 1
         contains:
           path: spec.template.spec.containers[0].env
@@ -489,13 +496,12 @@ tests:
           path: metadata.name
           value: RELEASE-NAME-cc-rc-beta-two
 
-  - it: uses an existing GH_TOKEN secret when github.existingSecret is set
+  - it: uses an existing GH_TOKEN secret when github.existingSecret is set, keyed by org
     template: statefulset-repo.yaml
     set:
       github:
-        token: ""
+        tokens: null
         existingSecret: my-existing-secret
-        existingSecretKey: gh-pat
       repos:
         - org: myorg
           repo: myrepo
@@ -507,7 +513,7 @@ tests:
       - documentIndex: 1
         equal:
           path: spec.template.spec.containers[0].env[0].valueFrom.secretKeyRef.key
-          value: gh-pat
+          value: myorg
 
   - it: has a readiness probe that checks for a running claude remote-control process, and no livenessProbe
     template: statefulset-repo.yaml
