@@ -146,7 +146,7 @@ tests:
           path: data["agent-entrypoint.sh"]
           pattern: '-lt "\$RC_SHUTDOWN_WAIT" \]; do'
 
-  - it: agent-entrypoint.sh prunes worktrees inactive longer than RC_WORKTREE_MAX_AGE_DAYS before starting remote-control
+  - it: agent-entrypoint.sh prunes worktrees not tracked by any session record, or stale past RC_WORKTREE_MAX_AGE_DAYS, before starting remote-control
     asserts:
       - matchRegex:
           path: data["agent-entrypoint.sh"]
@@ -156,7 +156,27 @@ tests:
           pattern: 'max_age_seconds=\$\(\( RC_WORKTREE_MAX_AGE_DAYS \* 86400 \)\)'
       - matchRegex:
           path: data["agent-entrypoint.sh"]
-          pattern: "git worktree remove --force \"\\$wt\""
+          # double --force: single --force only overrides an unclean
+          # worktree, not a locked one.
+          pattern: "git worktree remove --force --force \"\\$wt\""
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          # a worktree with no matching ~/.claude/sessions/ entry is
+          # removed unconditionally, no age check.
+          pattern: 'if \[ -z "\$session_file" \]; then'
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          # a matched-but-stale worktree also has its session bookkeeping
+          # files cleaned up, not just the worktree checkout.
+          pattern: 'rm -f "\$session_file" "/home/dev/\.claude/sessions/\$\{pid\}\."\*\.key'
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          # an unrecognized session/ccr-tip JSON shape fails pod startup
+          # outright rather than risking a mis-prune.
+          pattern: 'FATAL: \$f does not match the expected session JSON shape'
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          pattern: 'FATAL: \$tip_file does not match the expected ccr-tip JSON shape'
       - matchRegex:
           path: data["agent-entrypoint.sh"]
           # prune_stale_worktrees runs before remote-control starts, not after.

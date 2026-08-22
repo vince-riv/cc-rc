@@ -37,38 +37,84 @@ graceful_shutdown() {
 }
 trap graceful_shutdown TERM
 
-# Removes worktrees under .claude/worktrees/ whose most recent transcript
-# activity (~/.claude/projects/<encoded-worktree-path>/*.jsonl mtime) is
-# older than RC_WORKTREE_MAX_AGE_DAYS. Runs once per boot, before
-# starting remote-control, since PVCs are ReadWriteOnce and already
-# mounted here - a separate cleanup CronJob couldn't attach to them
-# while this pod is up.
+# Removes worktrees under .claude/worktrees/ that are either untracked
+# by any ~/.claude/sessions/ record, or tracked but stale
+# (RC_WORKTREE_MAX_AGE_DAYS+ since the session's last recorded activity).
+# Runs once per boot, before starting remote-control, since PVCs are
+# ReadWriteOnce and already mounted here - a separate cleanup CronJob
+# couldn't attach to them while this pod is up.
+#
+# --force --force (not just --force): a worktree still in active use by
+# claude remote-control may be *locked* (git worktree lock), not just
+# dirty - single --force only overrides an unclean worktree, not a lock.
+#
+# Fails pod startup (exit 1) rather than silently mis-pruning if
+# ~/.claude/sessions/*.json or ccr-tip.json don't match the shape this
+# script depends on - claude may have changed its format, and guessing
+# wrong here risks deleting an in-use worktree.
 prune_stale_worktrees() {
   cd /workspace/repo 2>/dev/null || return 0
-  [ -d .claude/worktrees ] || return 0
+  shopt -s nullglob
+  worktrees=(.claude/worktrees/*/)
+  shopt -u nullglob
+  [ ${#worktrees[@]} -gt 0 ] || return 0
+
+  declare -A session_file_for_cwd=()
+  for f in /home/dev/.claude/sessions/*.json; do
+    [ -f "$f" ] || continue
+    if ! jq -e 'has("pid") and has("cwd") and has("sessionId")' "$f" >/dev/null 2>&1; then
+      echo "FATAL: $f does not match the expected session JSON shape" \
+           "(pid/cwd/sessionId) - claude may have changed its format." \
+           "Refusing to prune worktrees blind until this script is updated." >&2
+      exit 1
+    fi
+    session_file_for_cwd["$(jq -r '.cwd' "$f")"]="$f"
+  done
+
   now=$(date +%s)
   max_age_seconds=$(( RC_WORKTREE_MAX_AGE_DAYS * 86400 ))
-  for wt in .claude/worktrees/*/; do
+
+  for wt in "${worktrees[@]}"; do
     [ -d "$wt" ] || continue
-    name=$(basename "$wt")
+    abs_path="/workspace/repo/${wt%/}"
+    session_file="${session_file_for_cwd[$abs_path]:-}"
+
+    if [ -z "$session_file" ]; then
+      echo "Pruning worktree $wt - no matching entry in ~/.claude/sessions/."
+      git worktree remove --force --force "$wt" 2>&1 || echo "Failed to remove worktree $wt"
+      continue
+    fi
+
+    session_id=$(jq -r '.sessionId' "$session_file")
     # claude encodes a worktree's absolute path into its
     # ~/.claude/projects/ dirname by replacing "/" and "." with "-".
-    encoded=$(printf '%s' "/workspace/repo/.claude/worktrees/${name}" | sed 's/[\/.]/-/g')
-    project_dir="/home/dev/.claude/projects/${encoded}"
-    newest=0
-    if [ -d "$project_dir" ]; then
-      newest=$(find "$project_dir" -name '*.jsonl' -printf '%T@\n' 2>/dev/null | sort -rn | head -1)
-      newest=${newest%.*}
-      newest=${newest:-0}
+    encoded=$(printf '%s' "$abs_path" | sed 's/[\/.]/-/g')
+    tip_file="/home/dev/.claude/projects/${encoded}/${session_id}/ccr-tip.json"
+
+    if [ ! -f "$tip_file" ]; then
+      echo "Skipping prune check for $wt - session recorded ($session_file) but no ccr-tip.json to determine activity."
+      continue
     fi
-    if [ "$newest" -gt 0 ]; then
-      age=$(( now - newest ))
-      if [ "$age" -ge "$max_age_seconds" ]; then
-        echo "Pruning stale worktree $wt (last transcript activity $(( age / 86400 )) days ago)."
-        git worktree remove --force "$wt" 2>&1 || echo "Failed to remove worktree $wt"
-      fi
-    else
-      echo "Skipping prune check for $wt - no transcript found to determine activity."
+    if ! jq -e 'has("updatedAt")' "$tip_file" >/dev/null 2>&1; then
+      echo "FATAL: $tip_file does not match the expected ccr-tip JSON shape" \
+           "(updatedAt) - claude may have changed its format." \
+           "Refusing to prune worktrees blind until this script is updated." >&2
+      exit 1
+    fi
+
+    updated_epoch=$(date -d "$(jq -r '.updatedAt' "$tip_file")" +%s 2>/dev/null || echo 0)
+    if [ "$updated_epoch" -eq 0 ]; then
+      echo "Skipping prune check for $wt - couldn't parse updatedAt from $tip_file."
+      continue
+    fi
+
+    age=$(( now - updated_epoch ))
+    if [ "$age" -ge "$max_age_seconds" ]; then
+      echo "Pruning worktree $wt (last activity $(( age / 86400 )) days ago) and its session record."
+      git worktree remove --force --force "$wt" 2>&1 || echo "Failed to remove worktree $wt"
+      pid=$(jq -r '.pid' "$session_file")
+      rm -f "$session_file" "/home/dev/.claude/sessions/${pid}."*.key
+      rm -rf "/home/dev/.claude/session-env/${session_id}"
     fi
   done
   git worktree prune 2>&1 || true
@@ -103,9 +149,8 @@ if [ ! -f "$MARKER" ]; then
   exit 0
 fi
 
-# Timestamp suffix keeps each boot's session name visibly distinct in
-# claude.ai/code, whether --continue reattaches an existing session or a
-# fresh one gets created below.
+# Timestamp suffix keeps each boot's session visibly distinct in
+# claude.ai/code from any prior boot's.
 NAME="${RC_NAME:-$(hostname)}-$(date +%Y%m%d-%H%M%S)"
 echo "Login already complete - starting claude remote-control (name=$NAME)."
 echo "Session output tailed below (and kept at $RC_LOG). To debug interactively:"

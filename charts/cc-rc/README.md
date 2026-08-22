@@ -259,8 +259,22 @@ top level (not per-repo).
 
 `claude remote-control --spawn worktree` isolates each on-demand session in its own
 git worktree under `.claude/worktrees/`, and nothing removes them. On every boot,
-before starting `remote-control`, the agent removes any worktree whose transcript
-(`~/.claude/projects/.../*.jsonl`) hasn't been written to in `worktreeMaxAgeDays` days.
+before starting `remote-control`, the agent cross-references each worktree against
+`~/.claude/sessions/*.json` (one file per session host process — see the recovery tool
+below):
+- No matching entry at all → removed immediately, regardless of age.
+- A matching entry whose session hasn't been active (per its `ccr-tip.json`
+  `updatedAt`) in `worktreeMaxAgeDays` days → the worktree **and** its session
+  bookkeeping files (`~/.claude/sessions/<pid>.json` + `.key`,
+  `~/.claude/session-env/<sessionId>/`) are removed together. The transcript itself
+  (`~/.claude/projects/.../*.jsonl`) is left alone.
+- A matching entry more recent than that → left alone (still rescuable, see below).
+
+Removal uses `git worktree remove --force --force` (not a single `--force`) since a
+worktree still in use by `claude remote-control` may be *locked*, not just dirty — one
+`--force` only overrides an unclean worktree, not a lock. If `~/.claude/sessions/*.json`
+or `ccr-tip.json` doesn't match the shape this logic depends on (claude changed its
+format), pod startup fails outright rather than risk mis-pruning an in-use worktree.
 
 Separately — and this is an upstream `claude remote-control` gap, not something this
 chart can fully fix (tracked in issue #9) — a worktree session whose host process
