@@ -64,8 +64,12 @@ git:
   editor: ""
   # -- init.defaultBranch
   defaultBranch: main
-  # -- push.default
-  pushDefault: upstream
+  # -- push.default. `simple` (git's own default) refuses a bare `git push`
+  # when the upstream branch name doesn't match the local branch name,
+  # instead of silently pushing to the mismatched upstream. `upstream`
+  # doesn't check this and can send a push to the wrong branch (e.g. main)
+  # if a branch was checked out from a differently-named ref.
+  pushDefault: simple
   # -- push.autoSetupRemote
   autoSetupRemote: true
   # -- color.ui

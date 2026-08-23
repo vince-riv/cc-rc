@@ -342,7 +342,7 @@ Pebble entrypoint relay that to its own stdout (otherwise it's only visible via
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | affinity | object | `{}` | Default affinity for every per-repo agent StatefulSet. Override per-repo via `repos[].affinity` (full replace, not merged with this default). |
-| git | object | `{"autoSetupRemote":true,"colorUi":"auto","defaultBranch":"main","editor":"","email":"","globalIgnore":["*~",".*.swp",".DS_Store","/target","*.egg-info","*.pyc","__pycache__","**/.claude/settings.local.json","**/.claude/worktrees/"],"logDecorate":"short","name":"","pushDefault":"upstream"}` | Git identity and global config for the `dev` user inside each agent, rendered into ~/.gitconfig and ~/.gitignore_global via a ConfigMap. Commit signing is intentionally not configured here. |
+| git | object | `{"autoSetupRemote":true,"colorUi":"auto","defaultBranch":"main","editor":"","email":"","globalIgnore":["*~",".*.swp",".DS_Store","/target","*.egg-info","*.pyc","__pycache__","**/.claude/settings.local.json","**/.claude/worktrees/"],"logDecorate":"short","name":"","pushDefault":"simple"}` | Git identity and global config for the `dev` user inside each agent, rendered into ~/.gitconfig and ~/.gitignore_global via a ConfigMap. Commit signing is intentionally not configured here. |
 | git.autoSetupRemote | bool | `true` | push.autoSetupRemote |
 | git.colorUi | string | `"auto"` | color.ui |
 | git.defaultBranch | string | `"main"` | init.defaultBranch |
@@ -351,7 +351,7 @@ Pebble entrypoint relay that to its own stdout (otherwise it's only visible via
 | git.globalIgnore | list | `["*~",".*.swp",".DS_Store","/target","*.egg-info","*.pyc","__pycache__","**/.claude/settings.local.json","**/.claude/worktrees/"]` | Patterns written to ~/.gitignore_global and wired up via core.excludesfile. |
 | git.logDecorate | string | `"short"` | log.decorate |
 | git.name | string | `""` | Commit author name. Required. |
-| git.pushDefault | string | `"upstream"` | push.default |
+| git.pushDefault | string | `"simple"` | push.default. `simple` (git's own default) refuses a bare `git push` when the upstream branch name doesn't match the local branch name, instead of silently pushing to the mismatched upstream. `upstream` doesn't check this and can send a push to the wrong branch (e.g. main) if a branch was checked out from a differently-named ref. |
 | github | object | `{"existingSecret":"","secretName":"","tokens":{}}` | GitHub auth for cloning repos and for the `gh`/`git` CLIs inside each agent. One GitHub PAT per org - GitHub PATs are scoped to a single org and/or user, so a single flat token rarely covers every repos[] entry. Every per-repo agent's GH_TOKEN comes from the key matching ITS OWN repos[].org within one Secret. Set EXACTLY ONE of `tokens` or `existingSecret`. |
 | github.existingSecret | string | `""` | Name of a pre-existing Secret to use instead of `tokens`, holding one key per org (key name == org name, matching repos[].org) - see `scripts/manage-github-tokens.sh`. Mutually exclusive with `tokens`. |
 | github.secretName | string | `""` | Name of the Secret the chart creates when `tokens` is set. Defaults to "<release>-cc-rc-github-tokens" when left empty. |
