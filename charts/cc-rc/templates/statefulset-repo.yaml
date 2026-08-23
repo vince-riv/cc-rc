@@ -4,9 +4,10 @@
 {{- $root := . -}}
 {{- $squidHost := printf "%s.%s.svc.cluster.local" (include "cc-rc.squidServiceName" .) .Release.Namespace -}}
 {{- $proxyURL := printf "http://%s:%v" $squidHost .Values.proxy.service.port -}}
-{{- /* .anthropic.com bypasses the proxy - see NetworkPolicy egress rule
-   for 160.79.104.0/23 / 2607:6bc0::/48 that allows this direct route. */ -}}
-{{- $noProxy := "localhost,127.0.0.1,.svc,.svc.cluster.local,.cluster.local,.anthropic.com" -}}
+{{- /* .anthropic.com and .claude.ai bypass the proxy - both resolve inside
+   160.79.104.0/23, already allowed direct by the NetworkPolicy egress rule
+   (see networkpolicy-agent.yaml) alongside 2607:6bc0::/48. */ -}}
+{{- $noProxy := "localhost,127.0.0.1,.svc,.svc.cluster.local,.cluster.local,.anthropic.com,claude.ai,.claude.ai" -}}
 {{- range $repoEntry := .Values.repos }}
 {{- $slug := include "cc-rc.repoSlug" $repoEntry }}
 {{- $name := printf "%s-%s" (include "cc-rc.fullname" $root) $slug }}

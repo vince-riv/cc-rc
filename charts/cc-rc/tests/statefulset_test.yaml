@@ -269,7 +269,7 @@ tests:
           path: spec.template.spec.containers[0].env
           content:
             name: NO_PROXY
-            value: localhost,127.0.0.1,.svc,.svc.cluster.local,.cluster.local,.anthropic.com
+            value: localhost,127.0.0.1,.svc,.svc.cluster.local,.cluster.local,.anthropic.com,claude.ai,.claude.ai
       - documentIndex: 1
         equal:
           path: spec.template.spec.initContainers[2].env

@@ -40,9 +40,9 @@ spec:
       ports:
         - protocol: TCP
           port: {{ .Values.proxy.service.port }}
-    # Anthropic's network CIDRs, so *.anthropic.com traffic (see NO_PROXY in
-    # statefulset-repo.yaml) can bypass squid and go direct instead of
-    # through the proxy.
+    # Anthropic's network CIDRs, so *.anthropic.com and claude.ai traffic
+    # (see NO_PROXY in statefulset-repo.yaml - both resolve into this range)
+    # can bypass squid and go direct instead of through the proxy.
     - to:
         - ipBlock:
             cidr: 160.79.104.0/23
