@@ -98,6 +98,8 @@ spec:
           image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
           imagePullPolicy: {{ $root.Values.image.pullPolicy }}
           command: ["/bin/bash", "/opt/cc-rc/scripts/seed-home.sh"]
+          securityContext:
+            readOnlyRootFilesystem: true
           volumeMounts:
             - name: home
               mountPath: /mnt/home-pvc
@@ -111,6 +113,8 @@ spec:
           image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
           imagePullPolicy: {{ $root.Values.image.pullPolicy }}
           command: ["/bin/bash", "/opt/cc-rc/scripts/seed-ssh.sh"]
+          securityContext:
+            readOnlyRootFilesystem: true
           env:
             - name: SQUID_HOST
               value: {{ $squidHost | quote }}
@@ -128,6 +132,8 @@ spec:
           image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
           imagePullPolicy: {{ $root.Values.image.pullPolicy }}
           command: ["/bin/bash", "/opt/cc-rc/scripts/clone-repo.sh"]
+          securityContext:
+            readOnlyRootFilesystem: true
           env:
             - name: REPO_ORG
               value: {{ $repoEntry.org | quote }}
@@ -151,6 +157,8 @@ spec:
           image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
           imagePullPolicy: {{ $root.Values.image.pullPolicy }}
           command: ["/bin/bash", "/opt/cc-rc/scripts/agent-entrypoint.sh"]
+          securityContext:
+            readOnlyRootFilesystem: true
           env:
             - name: GH_TOKEN
               valueFrom:
