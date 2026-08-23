@@ -190,8 +190,10 @@ resources: {}
   #   memory: 2Gi
 
 # -- Group ID applied via pod securityContext.fsGroup so freshly-mounted PVCs are
-# writable by the image's non-root `dev` user (created via `useradd -m`, uid/gid 1000).
-podFsGroup: 1000
+# writable by the image's non-root `dev` user (created via `useradd -m`, uid/gid 1001).
+# Changing this value re-chowns existing PVCs on their next pod mount (kubelet does
+# this automatically; fsGroupChangePolicy is not set, so it defaults to "Always").
+podFsGroup: 1001
 
 # -- Squid egress proxy configuration.
 proxy:
