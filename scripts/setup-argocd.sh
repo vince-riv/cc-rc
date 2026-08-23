@@ -13,9 +13,9 @@ case "$(dpkg --print-architecture)" in
 esac
 
 binary="argocd-linux-${arch}"
-curl -fsSL -o "/tmp/${binary}" \
+curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o "/tmp/${binary}" \
     "https://github.com/argoproj/argo-cd/releases/download/${ARGOCD_VERSION}/${binary}"
-curl -fsSL -o /tmp/argocd_checksums.txt \
+curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o /tmp/argocd_checksums.txt \
     "https://github.com/argoproj/argo-cd/releases/download/${ARGOCD_VERSION}/cli_checksums.txt"
 (cd /tmp && grep " ${binary}\$" argocd_checksums.txt | sha256sum -c -)
 

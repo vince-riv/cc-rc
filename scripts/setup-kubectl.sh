@@ -7,9 +7,9 @@ set -euo pipefail
 KUBECTL_VERSION=v1.36.4
 arch="$(dpkg --print-architecture)"
 
-curl -fsSL -o /tmp/kubectl \
+curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o /tmp/kubectl \
     "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${arch}/kubectl"
-curl -fsSL -o /tmp/kubectl.sha256 \
+curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o /tmp/kubectl.sha256 \
     "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${arch}/kubectl.sha256"
 (cd /tmp && echo "$(cat kubectl.sha256)  kubectl" | sha256sum -c -)
 

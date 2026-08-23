@@ -4,7 +4,8 @@ set -euo pipefail
 # Claude Code: native installer, lands in ~/.local/bin. Auto-updates are off
 # (DISABLE_AUTOUPDATER=1, set in the Dockerfile) - this image is rebuilt
 # regularly, so the version installed here is what runs.
-curl -fsSL https://claude.ai/install.sh | bash
+curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 \
+    https://claude.ai/install.sh | bash
 "$HOME/.local/bin/claude" --version
 
 # Manual session-recovery tool (see charts/cc-rc/files/scripts/rescue-sessions.sh
@@ -46,7 +47,8 @@ EOF
 # nvm, plus node 22/24/26 — 26 is nvm's default.
 # renovate: datasource=github-releases depName=nvm-sh/nvm
 NVM_VERSION=v0.40.7
-curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh" | bash
+curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 \
+    "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh" | bash
 \. "$HOME/.nvm/nvm.sh"
 nvm --version
 nvm install 22

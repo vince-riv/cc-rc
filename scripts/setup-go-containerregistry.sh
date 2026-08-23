@@ -15,9 +15,9 @@ case "$(dpkg --print-architecture)" in
 esac
 
 tarball="go-containerregistry_Linux_${arch}.tar.gz"
-curl -fsSL -o "/tmp/${tarball}" \
+curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o "/tmp/${tarball}" \
     "https://github.com/google/go-containerregistry/releases/download/${GO_CONTAINERREGISTRY_VERSION}/${tarball}"
-curl -fsSL -o /tmp/gcr_checksums.txt \
+curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o /tmp/gcr_checksums.txt \
     "https://github.com/google/go-containerregistry/releases/download/${GO_CONTAINERREGISTRY_VERSION}/checksums.txt"
 (cd /tmp && grep " ${tarball}\$" gcr_checksums.txt | sha256sum -c -)
 

@@ -3,9 +3,11 @@ set -euo pipefail
 
 # Helm: official install script, verifies its own checksum. Pinned to the
 # latest v4 tag so it doesn't fall back to a v3 release.
-version="$(curl -fsSL https://api.github.com/repos/helm/helm/releases \
+version="$(curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 \
+    https://api.github.com/repos/helm/helm/releases \
     | grep -oP '"tag_name":\s*"\Kv4[^"]+' | head -1)"
-curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 \
+curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 \
+    https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 \
     | DESIRED_VERSION="${version}" bash
 helm version
 
