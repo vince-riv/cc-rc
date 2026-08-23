@@ -56,6 +56,10 @@ tests:
         equal:
           path: metadata.labels["cc-rc.io/repo"]
           value: My_Repo!
+      - documentIndex: 1
+        equal:
+          path: metadata.annotations["argocd.argoproj.io/sync-wave"]
+          value: "1"
 
   - it: defaults revisionHistoryLimit to 5
     template: statefulset-repo.yaml
@@ -272,7 +276,7 @@ tests:
             value: localhost,127.0.0.1,.svc,.svc.cluster.local,.cluster.local,.anthropic.com,claude.ai,.claude.ai
       - documentIndex: 1
         equal:
-          path: spec.template.spec.initContainers[2].env
+          path: spec.template.spec.initContainers[3].env
           value:
             - name: REPO_ORG
               value: myorg
@@ -400,67 +404,87 @@ tests:
       - documentIndex: 1
         equal:
           path: spec.template.spec.initContainers[0].name
-          value: seed-home
+          value: wait-for-squid
       - documentIndex: 1
         equal:
           path: spec.template.spec.initContainers[0].command
+          value: ["/bin/bash", "/opt/cc-rc/scripts/wait-for-squid.sh"]
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.initContainers[0].env
+          content:
+            name: SQUID_HOST
+            value: RELEASE-NAME-cc-rc-squid.NAMESPACE.svc.cluster.local
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.initContainers[0].env
+          content:
+            name: SQUID_PORT
+            value: "3128"
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.initContainers[1].name
+          value: seed-home
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.initContainers[1].command
           value: ["/bin/bash", "/opt/cc-rc/scripts/seed-home.sh"]
       - documentIndex: 1
         contains:
-          path: spec.template.spec.initContainers[0].volumeMounts
+          path: spec.template.spec.initContainers[1].volumeMounts
           content:
             name: home
             mountPath: /mnt/home-pvc
       - documentIndex: 1
         contains:
-          path: spec.template.spec.initContainers[0].volumeMounts
+          path: spec.template.spec.initContainers[1].volumeMounts
           content:
             name: scripts
             mountPath: /opt/cc-rc/scripts
       - documentIndex: 1
         equal:
-          path: spec.template.spec.initContainers[1].name
+          path: spec.template.spec.initContainers[2].name
           value: seed-ssh
       - documentIndex: 1
         equal:
-          path: spec.template.spec.initContainers[1].command
+          path: spec.template.spec.initContainers[2].command
           value: ["/bin/bash", "/opt/cc-rc/scripts/seed-ssh.sh"]
       - documentIndex: 1
         contains:
-          path: spec.template.spec.initContainers[1].volumeMounts
+          path: spec.template.spec.initContainers[2].volumeMounts
           content:
             name: ssh-key
             mountPath: /mnt/ssh-key
             readOnly: true
       - documentIndex: 1
         contains:
-          path: spec.template.spec.initContainers[1].env
+          path: spec.template.spec.initContainers[2].env
           content:
             name: SQUID_HOST
             value: RELEASE-NAME-cc-rc-squid.NAMESPACE.svc.cluster.local
       - documentIndex: 1
         contains:
-          path: spec.template.spec.initContainers[1].env
+          path: spec.template.spec.initContainers[2].env
           content:
             name: SQUID_PORT
             value: "3128"
       - documentIndex: 1
         equal:
-          path: spec.template.spec.initContainers[2].name
+          path: spec.template.spec.initContainers[3].name
           value: clone-repo
       - documentIndex: 1
         equal:
-          path: spec.template.spec.initContainers[2].command
+          path: spec.template.spec.initContainers[3].command
           value: ["/bin/bash", "/opt/cc-rc/scripts/clone-repo.sh"]
       - documentIndex: 1
         contains:
-          path: spec.template.spec.initContainers[2].env
+          path: spec.template.spec.initContainers[3].env
           content:
             name: REPO_ORG
             value: myorg
       - documentIndex: 1
         contains:
-          path: spec.template.spec.initContainers[2].env
+          path: spec.template.spec.initContainers[3].env
           content:
             name: REPO_NAME
             value: myrepo
@@ -489,7 +513,7 @@ tests:
     asserts:
       - documentIndex: 1
         contains:
-          path: spec.template.spec.initContainers[2].volumeMounts
+          path: spec.template.spec.initContainers[3].volumeMounts
           content:
             name: gitconfig
             mountPath: /home/dev/.gitconfig

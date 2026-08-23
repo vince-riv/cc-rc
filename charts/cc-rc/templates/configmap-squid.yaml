@@ -28,6 +28,13 @@ data:
     http_port {{ .Values.proxy.service.port }}
     visible_hostname squid
     coredump_dir /var/spool/squid
+    {{- if gt (int .Values.proxy.gracefulShutdownSeconds) 0 }}
+    # Keep serving already-open connections this long on shutdown instead
+    # of dropping them - see proxy.gracefulShutdownSeconds in values.yaml.
+    # Requires deployment-squid.yaml's kill-delay/terminationGracePeriodSeconds
+    # to actually give kubelet/pebble that long.
+    shutdown_lifetime {{ .Values.proxy.gracefulShutdownSeconds }} seconds
+    {{- end }}
     # Default access_log/cache_log write to files inside the container,
     # invisible to `kubectl logs`/stern - redirect both to stdout instead.
     #
@@ -116,3 +123,15 @@ data:
     http_access allow open_ports
     http_access deny all
     {{- end }}
+  {{- if gt (int .Values.proxy.gracefulShutdownSeconds) 0 }}
+  # Pebble (this image's PID 1, see deployment-squid.yaml) kills its squid
+  # service 5s after SIGTERM by default (its "kill-delay") - shorter than
+  # shutdown_lifetime above, so squid would get SIGKILLed mid-drain without
+  # this override. "override: merge" layers this on top of the image's own
+  # baked-in 001-rockcraft-squid.yaml rather than replacing it.
+  pebble-kill-delay.yaml: |
+    services:
+      squid:
+        override: merge
+        kill-delay: {{ add (int .Values.proxy.gracefulShutdownSeconds) 10 }}s
+  {{- end }}

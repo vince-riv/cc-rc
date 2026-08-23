@@ -21,6 +21,11 @@ spec:
         app.kubernetes.io/component: proxy
     spec:
       automountServiceAccountToken: false
+      {{- if gt (int .Values.proxy.gracefulShutdownSeconds) 0 }}
+      # Must outlast squid.conf's shutdown_lifetime and the pebble
+      # kill-delay override below, or kubelet SIGKILLs mid-drain.
+      terminationGracePeriodSeconds: {{ add (int .Values.proxy.gracefulShutdownSeconds) 15 }}
+      {{- end }}
       {{- with .Values.proxy.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -40,19 +45,13 @@ spec:
         - name: squid
           image: "{{ .Values.proxy.image.repository }}:{{ .Values.proxy.image.tag }}"
           imagePullPolicy: {{ .Values.proxy.image.pullPolicy }}
-          # No command/args override: this is a Canonical "rock" image whose
-          # ENTRYPOINT is `pebble enter`, not squid itself - Pebble's own
-          # baked-in service layer already starts squid with
-          # `-f /etc/squid/squid.conf -NYC` (see
-          # /var/lib/pebble/default/layers/*-rockcraft-squid.yaml in the
-          # image). Passing args here would go to `pebble enter`, which
-          # doesn't understand squid's flags and crashloops.
+          # No command/args override: this Canonical "rock" image's
+          # ENTRYPOINT is `pebble enter`, which already starts squid via a
+          # baked-in service layer. Args here would go to `pebble enter`
+          # instead and crashloop.
           env:
-            # squid.conf sends access_log/cache_log to /dev/stdout, but
-            # Pebble (this image's PID 1) only relays service output to
-            # its own stdout - which is what `kubectl logs`/stern show -
-            # when running verbose; otherwise it's only visible via
-            # `pebble logs squid` inside the container.
+            # Pebble (PID 1) only relays service output to its own stdout
+            # (what `kubectl logs`/stern show) when verbose.
             - name: PEBBLE_VERBOSE
               value: "1"
           ports:
@@ -67,11 +66,9 @@ spec:
             failureThreshold: 12
           readinessProbe:
             {{- if .Values.proxy.probes.quiet }}
-            # tcpSocket would connect then disconnect without sending a
-            # request on every check, which squid logs as NONE_NONE/000
-            # error:transaction-end-before-headers - unfilterable in
-            # squid.conf (see configmap-squid.yaml). Check for a LISTEN
-            # socket directly instead, so squid never sees the probe.
+            # tcpSocket logs a NONE_NONE/000 error on every check (squid
+            # sees a connect-then-disconnect). Check for a LISTEN socket
+            # directly instead, so squid never sees the probe.
             exec:
               command:
                 - sh
@@ -100,6 +97,13 @@ spec:
             - name: squid-config
               mountPath: /etc/squid/squid.conf
               subPath: squid.conf
+            {{- if gt (int .Values.proxy.gracefulShutdownSeconds) 0 }}
+            - name: squid-config
+              # Layer files load in filename order, so 002 applies after
+              # the image's baked-in 001-rockcraft-squid.yaml.
+              mountPath: /var/lib/pebble/default/layers/002-cc-rc-kill-delay.yaml
+              subPath: pebble-kill-delay.yaml
+            {{- end }}
           {{- with .Values.proxy.resources }}
           resources:
             {{- toYaml . | nindent 12 }}

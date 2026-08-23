@@ -9,6 +9,8 @@ data:
     {{- .Files.Get "files/scripts/seed-home.sh" | nindent 4 }}
   seed-ssh.sh: |
     {{- .Files.Get "files/scripts/seed-ssh.sh" | nindent 4 }}
+  wait-for-squid.sh: |
+    {{- .Files.Get "files/scripts/wait-for-squid.sh" | nindent 4 }}
   clone-repo.sh: |
     {{- .Files.Get "files/scripts/clone-repo.sh" | nindent 4 }}
   agent-entrypoint.sh: |

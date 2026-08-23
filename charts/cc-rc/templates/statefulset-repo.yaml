@@ -48,6 +48,11 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: {{ $name }}
+  annotations:
+    # ArgoCD-only hint: apply after squid (default wave "0"), so a first
+    # sync doesn't race squid's rollout. wait-for-squid.sh below covers the
+    # same ordering for non-ArgoCD installs.
+    argocd.argoproj.io/sync-wave: "1"
   labels:
     {{- include "cc-rc.labels" $root | nindent 4 }}
     app.kubernetes.io/component: agent
@@ -90,6 +95,22 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       initContainers:
+        - name: wait-for-squid
+          image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          command: ["/bin/bash", "/opt/cc-rc/scripts/wait-for-squid.sh"]
+          securityContext:
+            readOnlyRootFilesystem: true
+          env:
+            - name: SQUID_HOST
+              value: {{ $squidHost | quote }}
+            - name: SQUID_PORT
+              value: {{ $root.Values.proxy.service.port | quote }}
+            - name: WAIT_TIMEOUT
+              value: {{ $root.Values.proxy.startupWaitTimeoutSeconds | quote }}
+          volumeMounts:
+            - name: scripts
+              mountPath: /opt/cc-rc/scripts
         - name: seed-home
           # Mounted at a path other than /home/dev, so the image's baked-in
           # home dir (e.g. ~/.claude/settings.json) stays visible here and

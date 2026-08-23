@@ -45,6 +45,18 @@ tests:
           path: data["clone-repo.sh"]
           pattern: "git@github\\.com:\\$\\{REPO_ORG\\}/\\$\\{REPO_NAME\\}\\.git"
 
+  - it: wait-for-squid.sh polls SQUID_HOST/SQUID_PORT until reachable or WAIT_TIMEOUT elapses
+    asserts:
+      - matchRegex:
+          path: data["wait-for-squid.sh"]
+          pattern: 'until timeout 2 bash -c "exec 3<>/dev/tcp/\$\{SQUID_HOST\}/\$\{SQUID_PORT\}" 2>/dev/null; do'
+      - matchRegex:
+          path: data["wait-for-squid.sh"]
+          pattern: 'if \[ "\$waited" -ge "\$WAIT_TIMEOUT" \]; then'
+      - matchRegex:
+          path: data["wait-for-squid.sh"]
+          pattern: "exit 1"
+
   - it: seed-ssh.sh copies the SSH key onto the home PVC and seeds known_hosts only if missing
     asserts:
       - matchRegex:

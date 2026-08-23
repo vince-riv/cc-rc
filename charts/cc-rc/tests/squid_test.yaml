@@ -41,6 +41,54 @@ tests:
           path: spec.template.metadata.labels["app.kubernetes.io/component"]
           value: proxy
 
+  - it: defaults gracefulShutdownSeconds to a 60s terminationGracePeriodSeconds and a matching pebble kill-delay mount
+    template: deployment-squid.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.terminationGracePeriodSeconds
+          value: 60
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: squid-config
+            mountPath: /var/lib/pebble/default/layers/002-cc-rc-kill-delay.yaml
+            subPath: pebble-kill-delay.yaml
+
+  - it: defaults gracefulShutdownSeconds to a 45s squid shutdown_lifetime and a 55s pebble kill-delay override
+    template: configmap-squid.yaml
+    asserts:
+      - matchRegex:
+          path: data["squid.conf"]
+          pattern: "shutdown_lifetime 45 seconds"
+      - matchRegex:
+          path: data["pebble-kill-delay.yaml"]
+          pattern: "kill-delay: 55s"
+
+  - it: proxy.gracefulShutdownSeconds=0 disables terminationGracePeriodSeconds and the kill-delay mount
+    template: deployment-squid.yaml
+    set:
+      proxy.gracefulShutdownSeconds: 0
+    asserts:
+      - notExists:
+          path: spec.template.spec.terminationGracePeriodSeconds
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: squid-config
+            mountPath: /var/lib/pebble/default/layers/002-cc-rc-kill-delay.yaml
+            subPath: pebble-kill-delay.yaml
+
+  - it: proxy.gracefulShutdownSeconds=0 disables shutdown_lifetime and the pebble-kill-delay.yaml key
+    template: configmap-squid.yaml
+    set:
+      proxy.gracefulShutdownSeconds: 0
+    asserts:
+      - notMatchRegex:
+          path: data["squid.conf"]
+          pattern: "shutdown_lifetime"
+      - notExists:
+          path: 'data["pebble-kill-delay.yaml"]'
+
   - it: defaults revisionHistoryLimit to 5
     template: deployment-squid.yaml
     asserts:

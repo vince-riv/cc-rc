@@ -209,6 +209,19 @@ proxy:
   # -- Number of old ReplicaSets to keep for rollback (Deployment's
   # revisionHistoryLimit).
   revisionHistoryLimit: 5
+
+  # -- Seconds each per-repo agent's wait-for-squid init container spends
+  # polling squid before giving up (statefulset-repo.yaml). Guards startup
+  # ordering on a cold install for any installer - helm, kubectl, or ArgoCD
+  # (which also gets a sync-wave hint, see statefulset-repo.yaml).
+  startupWaitTimeoutSeconds: 120
+
+  # -- Seconds squid keeps serving already-open connections after a shutdown
+  # signal (squid.conf's shutdown_lifetime), before terminating. Protects
+  # in-flight agent traffic (git+ssh, HTTP(S) CONNECT) when a squid replica
+  # rolls or scales down. New connections are refused immediately. Set to
+  # "0" to disable graceful shutdown.
+  gracefulShutdownSeconds: 45
   service:
     port: 3128
     type: ClusterIP
