@@ -11,7 +11,7 @@ update-alternatives --install /usr/bin/go go /usr/lib/go-1.26/bin/go 126 \
 # Go lint/debug tools, dropped into /usr/local/bin (global), pinned so builds
 # are reproducible.
 # renovate: datasource=github-releases depName=golangci/golangci-lint
-GOLANGCI_LINT_VERSION=v2.13.0
+GOLANGCI_LINT_VERSION=v2.13.1
 # renovate: datasource=github-releases depName=go-delve/delve
 DELVE_VERSION=v1.27.1
 
