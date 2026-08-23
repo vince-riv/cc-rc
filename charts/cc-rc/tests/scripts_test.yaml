@@ -18,7 +18,7 @@ tests:
           of: ConfigMap
       - matchRegex:
           path: data["seed-home.sh"]
-          pattern: "rsync -a --no-times --no-owner --no-group --no-perms --ignore-times"
+          pattern: "rsync -a --no-times --no-owner --no-group --no-perms --executability --ignore-times"
       - matchRegex:
           path: data["seed-home.sh"]
           pattern: "/home/dev/\\.claude/\\. /mnt/home-pvc/\\.claude/"
