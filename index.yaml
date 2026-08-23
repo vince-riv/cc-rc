@@ -3,7 +3,23 @@ entries:
   cc-rc:
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2026-08-22T23:22:37.871355679Z"
+    created: "2026-08-23T10:04:52.877807736Z"
+    description: Headless Claude Code remote-control agents (one StatefulSet per GitHub
+      repo) behind a locked-down Squid egress proxy
+    digest: 804d06f48cb6a07903319d6c6793ce15545c482594ff4dd164ffefcb80f1f7cd
+    keywords:
+    - claude-code
+    - agent
+    - squid
+    - egress-proxy
+    name: cc-rc
+    type: application
+    urls:
+    - https://vince-riv.github.io/cc-rc/cc-rc-2.2.1.tgz
+    version: 2.2.1
+  - apiVersion: v2
+    appVersion: 1.0.0
+    created: "2026-08-23T10:04:52.876433453Z"
     description: Headless Claude Code remote-control agents (one StatefulSet per GitHub
       repo) behind a locked-down Squid egress proxy
     digest: 9be9d78d91026120b97b9b93783d8ca2b949d61454d4d642a6e4eb2122632413
@@ -19,7 +35,7 @@ entries:
     version: 2.2.0
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2026-08-22T23:22:37.869291888Z"
+    created: "2026-08-23T10:04:52.875040244Z"
     description: Headless Claude Code remote-control agents (one StatefulSet per GitHub
       repo) behind a locked-down Squid egress proxy
     digest: 79fe87f8b96b4624533f862f4c23c231d5fcf3e5ed7244de3d7bba226cf444d7
@@ -35,7 +51,7 @@ entries:
     version: 2.1.0
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2026-08-22T23:22:37.867941286Z"
+    created: "2026-08-23T10:04:52.873718498Z"
     description: Headless Claude Code remote-control agents (one StatefulSet per GitHub
       repo) behind a locked-down Squid egress proxy
     digest: 6e9d47e78dcfa51a1339b750db86610b8c661842fa07e88c6714c0f7062f1610
@@ -51,7 +67,7 @@ entries:
     version: 2.0.0
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2026-08-22T23:22:37.866744487Z"
+    created: "2026-08-23T10:04:52.872453319Z"
     description: Headless Claude Code remote-control agents (one StatefulSet per GitHub
       repo) behind a locked-down Squid egress proxy
     digest: ae9aeacb78a2aaff8884c7dd986187504134046721f7268e68538a053932374b
@@ -67,7 +83,7 @@ entries:
     version: 1.1.0
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2026-08-22T23:22:37.865689602Z"
+    created: "2026-08-23T10:04:52.869122559Z"
     description: Headless Claude Code remote-control agents (one StatefulSet per GitHub
       repo) behind a locked-down Squid egress proxy
     digest: 4b3b6f87d39a23317012c5d8c94751bc0801587918abf332d79a2c7bf87ca6cb
@@ -83,7 +99,7 @@ entries:
     version: 1.0.0
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2026-08-22T23:22:37.864668818Z"
+    created: "2026-08-23T10:04:52.867997352Z"
     description: Headless Claude Code remote-control agents (one StatefulSet per GitHub
       repo) behind a locked-down Squid egress proxy
     digest: 884884fcd4d1db7b0ab3091dd4556e10b638d8686725c72a16d4c15bd5420981
@@ -99,7 +115,7 @@ entries:
     version: 0.4.2
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2026-08-22T23:22:37.863722367Z"
+    created: "2026-08-23T10:04:52.867091495Z"
     description: Headless Claude Code remote-control agents (one StatefulSet per GitHub
       repo) behind a locked-down Squid egress proxy
     digest: 13300beca71838654821faa59390c1d1da3f43be530e2ea3dff3c069a8b746fa
@@ -115,7 +131,7 @@ entries:
     version: 0.4.1
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2026-08-22T23:22:37.862001546Z"
+    created: "2026-08-23T10:04:52.86619139Z"
     description: Headless Claude Code remote-control agents (one StatefulSet per GitHub
       repo) behind a locked-down Squid egress proxy
     digest: d400cad628b417109b2ed1bc1bd8e8725bf9c058d680f8a36d74ace2cdf1b4fe
@@ -131,7 +147,7 @@ entries:
     version: 0.4.0
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2026-08-22T23:22:37.861125261Z"
+    created: "2026-08-23T10:04:52.865244697Z"
     description: Headless Claude Code remote-control agents (one StatefulSet per GitHub
       repo) behind a locked-down Squid egress proxy
     digest: 4139e1cd3e3fd81719c08f16f77ed69f66c9f2d5847d5c7ff8b347d12847f2d5
@@ -147,7 +163,7 @@ entries:
     version: 0.3.3
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2026-08-22T23:22:37.86027839Z"
+    created: "2026-08-23T10:04:52.863828534Z"
     description: Headless Claude Code remote-control agents (one StatefulSet per GitHub
       repo) behind a locked-down Squid egress proxy
     digest: 601948be602cb76c25bd605551d9c701cab182b813c927d654589b7c1b609765
@@ -163,7 +179,7 @@ entries:
     version: 0.3.2
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2026-08-22T23:22:37.859462016Z"
+    created: "2026-08-23T10:04:52.862221906Z"
     description: Headless Claude Code remote-control agents (one StatefulSet per GitHub
       repo) behind a locked-down Squid egress proxy
     digest: bfa0fb059e459554c556d3135beaa90fdc0bd4d414d36470906da5790900de54
@@ -179,7 +195,7 @@ entries:
     version: 0.3.1
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2026-08-22T23:22:37.85868404Z"
+    created: "2026-08-23T10:04:52.860551788Z"
     description: Headless Claude Code remote-control agents (one StatefulSet per GitHub
       repo) behind a locked-down Squid egress proxy
     digest: 46b08c08aed16ee31b4706be48698ceac4f1270fecd8426e07e4a9d8596d1114
@@ -195,7 +211,7 @@ entries:
     version: 0.3.0
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2026-08-22T23:22:37.857882668Z"
+    created: "2026-08-23T10:04:52.859812914Z"
     description: Headless Claude Code remote-control agents (one StatefulSet per GitHub
       repo) behind a locked-down Squid egress proxy
     digest: 3d169b1d3e54b954c8c3129b19e6aa66e704ea5c54299298d02d528689c91afb
@@ -211,7 +227,7 @@ entries:
     version: 0.2.5
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2026-08-22T23:22:37.857122859Z"
+    created: "2026-08-23T10:04:52.859087606Z"
     description: Headless Claude Code remote-control agents (one StatefulSet per GitHub
       repo) behind a locked-down Squid egress proxy
     digest: 6db7569dfaf9721c6dd5fab84ecb40e199164162e25fd9e1040879511f567ad2
@@ -227,7 +243,7 @@ entries:
     version: 0.2.4
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2026-08-22T23:22:37.856317882Z"
+    created: "2026-08-23T10:04:52.858337982Z"
     description: Headless Claude Code remote-control agents (one StatefulSet per GitHub
       repo) behind a locked-down Squid egress proxy
     digest: 2cbb7d547a47997de39a9ab9ec0b7e8685382446739aeb2741aeea5b8bf4ea01
@@ -243,7 +259,7 @@ entries:
     version: 0.2.3
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2026-08-22T23:22:37.854806337Z"
+    created: "2026-08-23T10:04:52.85760534Z"
     description: Headless Claude Code remote-control agents (one StatefulSet per GitHub
       repo) behind a locked-down Squid egress proxy
     digest: 6d07a89b96790ead609eb5bd43ad14cc338ab35a6fffe066291637a1b46f3da0
@@ -259,7 +275,7 @@ entries:
     version: 0.2.2
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2026-08-22T23:22:37.853426541Z"
+    created: "2026-08-23T10:04:52.856869712Z"
     description: Headless Claude Code remote-control agents (one StatefulSet per GitHub
       repo) behind a locked-down Squid egress proxy
     digest: 9a6e9eb7d1c1a94f7c9c9407d11b635a5d577a3534e6fd03ccc246505f3638e5
@@ -275,7 +291,7 @@ entries:
     version: 0.2.1
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2026-08-22T23:22:37.852669166Z"
+    created: "2026-08-23T10:04:52.856119407Z"
     description: Headless Claude Code remote-control agents (one StatefulSet per GitHub
       repo) behind a locked-down Squid egress proxy
     digest: fcd22c0bac439a3b63ffe89a5c0fb2df11deb1371fe605b228373055d49e6f0f
@@ -291,7 +307,7 @@ entries:
     version: 0.2.0
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2026-08-22T23:22:37.851883418Z"
+    created: "2026-08-23T10:04:52.855367359Z"
     description: Headless Claude Code remote-control agents (one StatefulSet per GitHub
       repo) behind a locked-down Squid egress proxy
     digest: c4c3c5b50c9189f8f6a7213ecd1b363bd701f58fe3a199b0a70ca793c43e0064
@@ -307,7 +323,7 @@ entries:
     version: 0.1.3
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2026-08-22T23:22:37.85117031Z"
+    created: "2026-08-23T10:04:52.853671553Z"
     description: Headless Claude Code remote-control agents (one StatefulSet per GitHub
       repo) behind a locked-down Squid egress proxy
     digest: 66a22fcd7ce0aed9bcdaab30630025f49589119da9996686b72f2ff499595a07
@@ -323,7 +339,7 @@ entries:
     version: 0.1.2
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2026-08-22T23:22:37.850467357Z"
+    created: "2026-08-23T10:04:52.85293329Z"
     description: Headless Claude Code remote-control agents (one StatefulSet per GitHub
       repo) behind a locked-down Squid egress proxy
     digest: 623ce0489431419dbf4ed9c642f79c6e799ff1ff76f98d28bcc01cad9f68f6ea
@@ -339,7 +355,7 @@ entries:
     version: 0.1.1
   - apiVersion: v2
     appVersion: 1.0.0
-    created: "2026-08-22T23:22:37.849778405Z"
+    created: "2026-08-23T10:04:52.852194727Z"
     description: Headless Claude Code remote-control agents (one StatefulSet per GitHub
       repo) behind a locked-down Squid egress proxy
     digest: 3097bf7d23c1334cba3485da19a0ecaba006f829cb99c6f13730af1d87e0aa8a
@@ -353,4 +369,4 @@ entries:
     urls:
     - https://vince-riv.github.io/cc-rc/cc-rc-0.1.0.tgz
     version: 0.1.0
-generated: "2026-08-22T23:22:37.848950043Z"
+generated: "2026-08-23T10:04:52.85148605Z"
