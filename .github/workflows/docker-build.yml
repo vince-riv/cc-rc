@@ -6,10 +6,16 @@ on:
     paths:
       - Dockerfile
       - .github/workflows/docker-build.yml
+      - scripts/**
+      - .claude/**
+      - charts/cc-rc/files/scripts/rescue-sessions.sh
   pull_request:
     paths:
       - Dockerfile
       - .github/workflows/docker-build.yml
+      - scripts/**
+      - .claude/**
+      - charts/cc-rc/files/scripts/rescue-sessions.sh
   # Weekly rebuild so base image / apt / go install@latest updates land
   # even without a Dockerfile change. Wednesdays at 07:30 UTC.
   schedule:
