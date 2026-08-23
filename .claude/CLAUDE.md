@@ -9,6 +9,18 @@ to prove push/`gh` access work *before* you invest time in the task.
 It does not change how you write chat replies — that's the separate
 `STE100 + ADHD` output style.
 
+## 0. Hard rules
+
+- NEVER push to `main` or `master`. ALWAYS work on a branch and open a PR.
+- NEVER create tags or releases unless the user explicitly asks for one.
+- NEVER force-push or rewrite history on a shared branch. Only use
+  `--force-with-lease` on your own task branch, and only when needed.
+- NEVER delete or overwrite a file without reading it first.
+- NEVER disable, skip, or weaken a failing test to make CI pass. Fix the
+  root cause, or leave the test failing and flag it in the ledger.
+- NEVER merge your own PR. Leave that to the user or a required review.
+- If a task adds a new dependency, call it out in the PR summary.
+
 ## 1. Before writing any code
 
 1. Fetch first: `git fetch origin`. If you're not already on a
