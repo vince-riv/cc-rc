@@ -23,6 +23,12 @@ It does not change how you write chat replies — that's the separate
 
 ## 1. Before writing any code
 
+The harness may auto-create a worktree and branch for the session. That
+branch is NOT a substitute for the sequence below. It has no upstream, no
+Draft PR, and no ledger — a fresh agent can't resume from it. Run steps 1-3
+first, in every session, before any code change, even when the harness has
+already put you on a branch.
+
 1. Fetch first: `git fetch origin`. If you're not already on a
    task-specific branch, create one from a fresh `origin/<default-branch>`
    — e.g. `git checkout -b <branch> origin/main` — not from whatever a
