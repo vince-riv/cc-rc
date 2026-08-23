@@ -27,7 +27,7 @@ tests:
           pattern: "excludesfile = /home/dev/.gitignore_global"
       - matchRegex:
           path: data[".gitconfig"]
-          pattern: "default = upstream"
+          pattern: "default = simple"
       - matchRegex:
           path: data[".gitconfig"]
           pattern: "defaultBranch = main"
