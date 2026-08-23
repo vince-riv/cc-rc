@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Claude Code: native installer, lands in ~/.local/bin. Auto-updates stay on.
+# Claude Code: native installer, lands in ~/.local/bin. Auto-updates are off
+# (DISABLE_AUTOUPDATER=1, set in the Dockerfile) - this image is rebuilt
+# regularly, so the version installed here is what runs.
 curl -fsSL https://claude.ai/install.sh | bash
 "$HOME/.local/bin/claude" --version
 

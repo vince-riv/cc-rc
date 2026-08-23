@@ -106,8 +106,15 @@ RUN useradd -m -s /bin/bash dev \
 USER dev
 WORKDIR /home/dev
 
-# Claude Code (auto-updates on), the helm unittest plugin, and ~/.claude
-# config, all installed as `dev` so they land under `dev`'s home, not root's.
+# Auto-updates off: this image is rebuilt regularly, so claude's own version
+# is already pinned at build time. Runtime self-updates aren't needed, and
+# an interrupted one (e.g. a pod crash-looping mid-download) leaves a stuck,
+# non-executable binary at ~/.local/share/claude/versions/<ver> - claude's
+# updater writes straight to that path and only chmods +x as its last step.
+ENV DISABLE_AUTOUPDATER=1
+
+# Claude Code, the helm unittest plugin, and ~/.claude config, all installed
+# as `dev` so they land under `dev`'s home, not root's.
 RUN --mount=type=bind,source=scripts/setup-dev.sh,target=/opt/build-scripts/setup-dev.sh \
     --mount=type=bind,source=.claude/output-styles/ste100-adhd.md,target=/opt/build-scripts/ste100-adhd.md \
     --mount=type=bind,source=charts/cc-rc/files/scripts/rescue-sessions.sh,target=/opt/build-scripts/rescue-sessions.sh \
