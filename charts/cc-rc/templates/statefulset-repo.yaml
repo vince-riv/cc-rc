@@ -226,6 +226,10 @@ spec:
               mountPath: /opt/cc-rc/scripts
             - name: tmp
               mountPath: /tmp
+            - name: screen-run
+              # screen's default SockDir - needs its own writable dir now
+              # that the root filesystem is read-only.
+              mountPath: /run/screen
           {{- with $resources }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -243,6 +247,9 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: {{ $tmpSize }}
+        - name: screen-run
+          emptyDir:
+            sizeLimit: 1Mi
   volumeClaimTemplates:
     - apiVersion: v1
       kind: PersistentVolumeClaim
