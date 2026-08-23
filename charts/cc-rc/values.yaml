@@ -197,7 +197,7 @@ podFsGroup: 1000
 proxy:
   image:
     repository: ubuntu/squid
-    tag: 7.2-26.04_edge@sha256:382ea00b5219492965a9ddd47da758317b77cd2f37d31b57fbf396ac6445daea
+    tag: 7.2-26.04_edge@sha256:0e45b74dd3bf58078961273e100f5e945f2233a6b29e22b582c6ed78e93d2044
     pullPolicy: IfNotPresent
   replicaCount: 1
   # -- Number of old ReplicaSets to keep for rollback (Deployment's
