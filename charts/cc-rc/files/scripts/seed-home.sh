@@ -15,9 +15,15 @@ set -euo pipefail
 # doesn't chown), so non-root can never chown/chgrp/chmod
 # it - EPERM, even though writing new files inside it works
 # fine. New files still land with sane permissions anyway.
+# --executability: without it, a file that's already the right size
+# (e.g. a claude binary left non-executable by some prior mishap) is
+# treated as unchanged by rsync's quick check and never re-synced -
+# --no-perms skips it, so a corrupted exec bit stays corrupted forever,
+# even across full pod recreation. This flag re-checks and restores
+# just the source's execute bit, without needing a full re-transfer.
 mkdir -p /home/dev/.claude /mnt/home-pvc/.claude
-rsync -a --no-times --no-owner --no-group --no-perms --ignore-times \
+rsync -a --no-times --no-owner --no-group --no-perms --executability --ignore-times \
   /home/dev/.claude/. /mnt/home-pvc/.claude/
-rsync -a --delete --no-times --no-owner --no-group --no-perms \
+rsync -a --delete --no-times --no-owner --no-group --no-perms --executability \
   --exclude=.claude --exclude=.cc-rc --exclude=.claude.json \
   /home/dev/. /mnt/home-pvc/
