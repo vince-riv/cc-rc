@@ -25,7 +25,7 @@ It does not change how you write chat replies — that's the separate
 
 The harness may auto-create a worktree and branch for the session. That
 branch is NOT a substitute for the sequence below. It has no upstream, no
-Draft PR, and no ledger — a fresh agent can't resume from it. Run steps 1-3
+Draft PR, and no ledger — a fresh agent can't resume from it. Run steps 1-2
 first, in every session, before any code change, even when the harness has
 already put you on a branch.
 
@@ -39,17 +39,31 @@ already put you on a branch.
 2. Push it immediately, even with no commits yet:
    `git push -u origin <branch>`. This confirms push access works before
    you rely on it later.
-3. Open a **Draft PR** with `cc-rc-pr-update` (see below). This confirms
-   `gh` access works, and gives a fresh agent something to find if this
-   session is lost.
-4. If a branch/PR already exists for this task — you're resuming a lost
+3. If a branch/PR already exists for this task — you're resuming a lost
    session — reuse it. Never open a duplicate.
 
-## 2. `cc-rc-pr-update`: creating and updating the PR
+## 2. Open the Draft PR at the first opportunity
 
-Don't hand-craft `gh pr create`/`gh pr edit` calls or PR markdown yourself.
-Use the baked-in `cc-rc-pr-update` command instead — it builds the PR body
-consistently and picks create-vs-edit for you.
+GitHub won't open a PR for a branch with no commits of its own, so the
+Draft PR can't come before the first code change. Open it at the **earliest
+convenient point instead: as soon as you have a first meaningful chunk of
+work committed and pushed, and before you spend time on validation**
+(tests, builds, lint, manual checks, long-running commands). Opening it
+there still confirms `gh` access early, and leaves a fresh agent something
+to find if this session is lost before validation finishes.
+
+Concretely, for the first chunk of work: make the change, commit it, push
+it, then run `cc-rc-pr-update` (see below). Only then start verifying.
+
+For a task so small that the whole change *is* the first chunk, still open
+the Draft PR before you run tests, not after.
+
+## 3. `cc-rc-pr-update`: creating and updating the PR
+
+Don't hand-craft `gh pr create`/`gh pr edit`/`gh pr comment` calls or PR
+markdown yourself. Use the baked-in `cc-rc-pr-update` command instead — it
+builds the PR consistently, picks create-vs-edit for you, and keeps the
+plan and ledger in one comment rather than duplicating them.
 
 Write three plain-markdown files (e.g. under `/tmp`), then run it:
 
@@ -75,16 +89,23 @@ cc-rc-pr-update \
   a one-line placeholder, for the very first call.
 
 Any of the three flags accepts `-` to read that section from stdin instead
-of a file. Re-running the command regenerates the whole PR body from the
-three inputs every time — always pass all three, even when only the ledger
-changed, so the sections never drift out of the template.
+of a file. Re-running the command regenerates everything from the three
+inputs every time — always pass all three, even when only the ledger
+changed, so nothing drifts out of the template.
 
-The Plan and Progress ledger sections both render **collapsed** (`<details>`,
-not `<details open>`) — the summary above them should be enough to read at a
-glance; expand either only when you actually need the detail.
+**Where each section lands.** The PR *body* holds the summary only, so the
+description stays short and reviewable. The plan and the progress ledger go
+in a single **comment** on the PR, headed `🤖 Agent plan & progress ledger`
+and tagged with a hidden `<!-- cc-rc-pr-update:plan-and-ledger -->` marker.
+The command finds that comment by its marker and rewrites it in place, so
+repeat calls update one comment instead of adding new ones. Both sections
+inside it render **collapsed** (`<details>`, not `<details open>`) — expand
+them only when you actually need the detail. To read the plan or ledger of
+a PR you're resuming, look for that heading in the PR's comments.
 
-First call with no PR open yet for this branch creates a **Draft PR**.
-Later calls edit that same PR in place.
+First call with no PR open yet for this branch creates a **Draft PR** and
+its plan/ledger comment. Later calls edit that same PR and comment in
+place.
 
 **Writing the section files:** GitHub renders a single `\n` inside a PR/
 issue body as a literal line break, not as a space like most Markdown
@@ -96,7 +117,7 @@ paragraphs only with a blank line. Markdown lists/headings are unaffected —
 keep those on their own lines as normal, since that line-per-item structure
 is what you want rendered anyway.
 
-## 3. While working
+## 4. While working
 
 - Commit using **Conventional Commits**: `type(scope): description`.
 - For multi-phase or complex tasks, commit and push at natural break
@@ -112,7 +133,7 @@ is what you want rendered anyway.
   Be concrete enough that a fresh agent could pick the PR up cold and
   continue without re-deriving anything.
 
-## 4. When the plan is complete
+## 5. When the plan is complete
 
 1. Verify the work — run tests/build as the repo's own conventions
    require.
@@ -120,4 +141,5 @@ is what you want rendered anyway.
    completed state.
 3. Mark the PR ready: `cc-rc-pr-update --ready` (reuses the branch's
    existing PR; add `--title`/`--summary-file`/`--plan-file`/
-   `--ledger-file` too if you want a final body refresh at the same time).
+   `--ledger-file` too if you want a final body and comment refresh at the
+   same time).
