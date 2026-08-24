@@ -5,8 +5,10 @@ mkdir -p "$MARKER_DIR"
 
 LOGIN_LOG="/tmp/cc-rc-claude-login.log"
 RC_LOG="/tmp/cc-rc-remote-control.log"
+WARMUP_LOG="/tmp/cc-rc-warmup.log"
 RC_WORKTREE_MAX_AGE_DAYS="${RC_WORKTREE_MAX_AGE_DAYS:-10}"
 RC_SHUTDOWN_WAIT="${RC_SHUTDOWN_WAIT:-55}"
+RC_WARMUP_TIMEOUT="${RC_WARMUP_TIMEOUT:-120}"
 
 # pgrep -f matches full command lines, including this very
 # script's own (it echoes "claude remote-control" in its
@@ -157,6 +159,24 @@ echo "Session output tailed below (and kept at $RC_LOG). To debug interactively:
 echo "  kubectl exec -it \$(hostname) -- screen -r remote-control"
 
 prune_stale_worktrees
+
+# remote-control doesn't refresh stale authentication on startup, but an
+# ordinary `claude` run does - so after a roll it comes up unauthenticated
+# until someone runs `claude` by hand. What the run actually refreshes is
+# unknown: ~/.claude/.credentials.json is untouched across it, so the state
+# lives elsewhere. One run at boot is enough (confirmed), hence no timer.
+# bash -lic: ~/.local/bin only reaches PATH via /etc/profile.d and
+# /etc/bash.bashrc (scripts/setup-path.sh); cd avoids a trust prompt.
+# Bounded and non-fatal: no livenessProbe would rescue a hung warm-up, and
+# remote-control is still worth starting if this fails.
+: > "$WARMUP_LOG"
+if timeout "$RC_WARMUP_TIMEOUT" bash -lic 'cd /workspace/repo && claude -p "ok" --max-turns 1' > "$WARMUP_LOG" 2>&1; then
+  echo "Auth warm-up run completed (output at $WARMUP_LOG)."
+else
+  echo "Auth warm-up run failed or timed out after ${RC_WARMUP_TIMEOUT}s -" \
+       "starting remote-control anyway; it may fail to authenticate. Output:"
+  cat "$WARMUP_LOG"
+fi
 
 : > "$RC_LOG"
 # --continue was tried here and dropped: claude remote-control rejects

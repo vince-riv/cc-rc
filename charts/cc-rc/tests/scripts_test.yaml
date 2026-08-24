@@ -191,8 +191,30 @@ tests:
           pattern: 'FATAL: \$tip_file does not match the expected ccr-tip JSON shape'
       - matchRegex:
           path: data["agent-entrypoint.sh"]
-          # prune_stale_worktrees runs before remote-control starts, not after.
-          pattern: "prune_stale_worktrees\\n\\n: > \"\\$RC_LOG\""
+          # prune_stale_worktrees runs before remote-control starts, not
+          # after - the auth warm-up run sits between the two. Anchored on
+          # code, not comment prose, which is free to be reworded.
+          pattern: 'prune_stale_worktrees\n\n(#[^\n]*\n)+: > "\$WARMUP_LOG"'
+
+  - it: agent-entrypoint.sh refreshes authentication with a warm-up claude run before starting remote-control
+    asserts:
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          # bash -lic, not a bare `claude`: the entrypoint's shell is
+          # non-login and non-interactive, so ~/.local/bin isn't on PATH.
+          pattern: 'timeout "\$RC_WARMUP_TIMEOUT" bash -lic ''cd /workspace/repo && claude -p "ok" --max-turns 1'''
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          # bounded: no livenessProbe would rescue a hung warm-up.
+          pattern: 'RC_WARMUP_TIMEOUT="\$\{RC_WARMUP_TIMEOUT:-120\}"'
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          # non-fatal: remote-control still starts after a failed warm-up.
+          pattern: 'starting remote-control anyway; it may fail to authenticate\.'
+      - matchRegex:
+          path: data["agent-entrypoint.sh"]
+          # warm-up runs before remote-control starts, not after.
+          pattern: "fi\\n\\n: > \"\\$RC_LOG\""
 
   - it: bash-prompt-hook.sh prints login instructions once and defines cc-rc-finish-login
     asserts:
