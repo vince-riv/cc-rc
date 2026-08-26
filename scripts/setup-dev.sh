@@ -19,6 +19,9 @@ helm plugin list
 
 # Claude Code config: output style, telemetry off, workspace permissions,
 # and the git/PR workflow instructions every coding-task agent follows.
+# attribution.sessionUrl is off: agents here run as Remote Control sessions,
+# and the claude.ai session link they'd otherwise add to every commit trailer
+# and PR body is not resolvable by anyone reviewing the repo.
 mkdir -p ~/.claude/output-styles
 cp /opt/build-scripts/ste100-adhd.md ~/.claude/output-styles/ste100-adhd.md
 cp /opt/build-scripts/CLAUDE.md ~/.claude/CLAUDE.md
@@ -40,7 +43,10 @@ cat > ~/.claude/settings.json <<'EOF'
     ]
   },
   "outputStyle": "STE100 + ADHD",
-  "theme": "auto"
+  "theme": "auto",
+  "attribution": {
+    "sessionUrl": false
+  }
 }
 EOF
 
