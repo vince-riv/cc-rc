@@ -4,6 +4,10 @@
     {
       "matchDepNames": ["ghcr.io/vince-riv/cc-rc"],
       "enabled": false
+    },
+    {
+      "matchDepNames": ["ubuntu/squid"],
+      "enabled": false
     }
   ],
   "customManagers": [
