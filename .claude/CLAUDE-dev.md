@@ -9,6 +9,12 @@ to prove push/`gh` access work *before* you invest time in the task.
 It does not change how you write chat replies — that's the separate
 `STE100 + ADHD` output style.
 
+## Go versions
+
+This image ships Go 1.25 and 1.26, managed by `update-alternatives`. Plain
+`go` on `PATH` resolves to 1.26 (the default). To use 1.25 instead, call it
+directly: `/usr/lib/go-1.25/bin/go`.
+
 ## 0. Hard rules
 
 - NEVER push to `main` or `master`. ALWAYS work on a branch and open a PR.
