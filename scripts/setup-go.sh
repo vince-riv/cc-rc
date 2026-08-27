@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# golang-1.25 / golang-1.26 land under /usr/lib/go-<ver>/, not on PATH.
-# Register both with update-alternatives; 1.26 wins by default.
+# golang-1.25 / golang-1.26 / golang-1.27 land under /usr/lib/go-<ver>/, not
+# on PATH. Register all three with update-alternatives, priority = version,
+# then force 1.26 as the default explicitly (highest priority would
+# otherwise win, which is 1.27 once it's registered).
 update-alternatives --install /usr/bin/go go /usr/lib/go-1.25/bin/go 125 \
         --slave /usr/bin/gofmt gofmt /usr/lib/go-1.25/bin/gofmt
 update-alternatives --install /usr/bin/go go /usr/lib/go-1.26/bin/go 126 \
         --slave /usr/bin/gofmt gofmt /usr/lib/go-1.26/bin/gofmt
+update-alternatives --install /usr/bin/go go /usr/lib/go-1.27/bin/go 127 \
+        --slave /usr/bin/gofmt gofmt /usr/lib/go-1.27/bin/gofmt
+update-alternatives --set go /usr/lib/go-1.26/bin/go
 
 # Go lint/debug tools, dropped into /usr/local/bin (global), pinned so builds
 # are reproducible.

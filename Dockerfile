@@ -18,6 +18,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         build-essential \
         golang-1.25 \
         golang-1.26 \
+        golang-1.27 \
         openssh-client \
         connect-proxy \
         python3 \
@@ -63,7 +64,7 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
 # in an image layer. Each gets its own tmpfs /tmp, discarded after the RUN,
 # so none of them need to clean up what they download.
 
-# go 1.25/1.26 via update-alternatives, plus golangci-lint and dlv.
+# go 1.25/1.26/1.27 via update-alternatives, plus golangci-lint and dlv.
 RUN --mount=type=bind,source=scripts/setup-go.sh,target=/opt/build-scripts/setup-go.sh \
     --mount=type=tmpfs,target=/tmp \
     bash /opt/build-scripts/setup-go.sh
