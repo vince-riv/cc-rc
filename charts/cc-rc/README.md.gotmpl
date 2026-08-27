@@ -323,6 +323,64 @@ proxy:
     minAvailable: 1
 ```
 
+## Custom labels and annotations
+
+Every workload this chart creates takes four extra-metadata knobs: `labels`/
+`annotations` land on the workload object, and `podLabels`/`podAnnotations` land on its
+pods. As with scheduling, there's no single global set — squid and the per-repo agents
+are configured independently.
+
+| | squid Deployment | per-repo agent StatefulSets |
+| --- | --- | --- |
+| workload object labels | `proxy.labels` | `labels`, `repos[].labels` |
+| workload object annotations | `proxy.annotations` | `annotations`, `repos[].annotations` |
+| pod labels | `proxy.podLabels` | `podLabels`, `repos[].podLabels` |
+| pod annotations | `proxy.podAnnotations` | `podAnnotations`, `repos[].podAnnotations` |
+
+The `repos[]` maps are merged **per key** over the top-level default — the same way
+`repos[].resources` deep-merges over `resources` — so a repo can add or replace one
+entry without repeating the shared set:
+
+```yaml
+labels:
+  team: platform
+  cost-center: shared
+podAnnotations:
+  prometheus.io/scrape: "true"
+
+proxy:
+  labels:
+    team: netops
+  podAnnotations:
+    prometheus.io/scrape: "true"
+
+repos:
+  - org: myorg
+    repo: myrepo          # gets team=platform, cost-center=shared
+  - org: myorg
+    repo: gpu-repo
+    labels:
+      team: data          # replaces team; cost-center=shared still applies
+    podAnnotations:
+      prometheus.io/port: "9100"   # added alongside the inherited scrape=true
+```
+
+Two things are deliberately out of scope. Extra metadata is applied to the squid
+Deployment, the per-repo StatefulSets, and the pods of both — not to the Services,
+ConfigMaps, Secrets, NetworkPolicy, PDB, or SSH-key Job. And the chart keeps ownership
+of a fixed set of keys: `app.kubernetes.io/name`, `app.kubernetes.io/instance`,
+`app.kubernetes.io/managed-by`, `app.kubernetes.io/component`, `helm.sh/chart`,
+`cc-rc.io/org`, `cc-rc.io/repo`, `checksum/config` and `checksum/scripts`. Those back
+the (immutable) pod selectors and the config-checksum annotations that roll a workload
+when its ConfigMap changes. Setting one of them from any of the values above fails the
+render with a pointed message rather than being silently dropped:
+
+```
+Error: execution error at (cc-rc/templates/statefulset-repo.yaml:32:33): podLabels may
+not set "app.kubernetes.io/name" - the chart owns that key (pod selectors, the
+app.kubernetes.io/* set, and config checksums). Remove it.
+```
+
 ## Configuring egress
 
 `proxy.allowList` empty (default) = open-web mode: any destination is reachable on

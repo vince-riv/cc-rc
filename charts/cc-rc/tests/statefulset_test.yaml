@@ -794,3 +794,188 @@ tests:
     asserts:
       - failedTemplate:
           errorMessageRegex: "repos\\[\\].remoteControl.permissionMode must be one of"
+
+  - it: adds the top-level labels/annotations to the StatefulSet object only, and podLabels/podAnnotations to its pods only
+    template: statefulset-repo.yaml
+    set:
+      labels:
+        team: platform
+      annotations:
+        example.com/owner: platform
+      podLabels:
+        tier: batch
+      podAnnotations:
+        prometheus.io/scrape: "true"
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - documentIndex: 1
+        equal:
+          path: metadata.labels.team
+          value: platform
+      - documentIndex: 1
+        equal:
+          path: metadata.annotations["example.com/owner"]
+          value: platform
+      # Object-scoped values stay off the pods, and pod-scoped ones off the object.
+      - documentIndex: 1
+        isNull:
+          path: metadata.labels.tier
+      - documentIndex: 1
+        isNull:
+          path: metadata.annotations["prometheus.io/scrape"]
+      - documentIndex: 1
+        equal:
+          path: spec.template.metadata.labels.tier
+          value: batch
+      - documentIndex: 1
+        equal:
+          path: spec.template.metadata.annotations["prometheus.io/scrape"]
+          value: "true"
+      - documentIndex: 1
+        isNull:
+          path: spec.template.metadata.labels.team
+      - documentIndex: 1
+        isNull:
+          path: spec.template.metadata.annotations["example.com/owner"]
+      # Chart-owned metadata survives the merge.
+      - documentIndex: 1
+        equal:
+          path: metadata.labels["cc-rc.io/repo"]
+          value: myrepo
+      - documentIndex: 1
+        equal:
+          path: metadata.annotations["argocd.argoproj.io/sync-wave"]
+          value: "1"
+      - documentIndex: 1
+        isNotNull:
+          path: spec.template.metadata.annotations["checksum/scripts"]
+
+  - it: leaves the headless Service and the pod selector free of extra labels
+    template: statefulset-repo.yaml
+    set:
+      labels:
+        team: platform
+      podLabels:
+        tier: batch
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - documentIndex: 0
+        isNull:
+          path: metadata.labels.team
+      - documentIndex: 0
+        isNull:
+          path: metadata.labels.tier
+      - documentIndex: 1
+        equal:
+          path: spec.selector.matchLabels
+          value:
+            app.kubernetes.io/name: cc-rc
+            app.kubernetes.io/instance: RELEASE-NAME
+            app.kubernetes.io/component: agent
+            cc-rc.io/org: myorg
+            cc-rc.io/repo: myrepo
+
+  - it: merges repos[] extra metadata per key over the top-level defaults, per repo
+    template: statefulset-repo.yaml
+    set:
+      labels:
+        team: platform
+        cost-center: shared
+      podLabels:
+        tier: batch
+      annotations:
+        example.com/owner: platform
+      podAnnotations:
+        prometheus.io/scrape: "true"
+      repos:
+        - org: alpha
+          repo: alpharepo
+        - org: beta
+          repo: betarepo
+          labels:
+            team: data
+          podLabels:
+            gpu: "yes"
+          annotations:
+            example.com/owner: data
+          podAnnotations:
+            prometheus.io/port: "9100"
+    asserts:
+      # alpha has no overrides, so it gets the top-level defaults untouched.
+      - documentIndex: 1
+        equal:
+          path: metadata.labels.team
+          value: platform
+      - documentIndex: 1
+        isNull:
+          path: spec.template.metadata.labels.gpu
+      # beta replaces `team` but keeps the un-overridden `cost-center`.
+      - documentIndex: 3
+        equal:
+          path: metadata.labels.team
+          value: data
+      - documentIndex: 3
+        equal:
+          path: metadata.labels.cost-center
+          value: shared
+      - documentIndex: 3
+        equal:
+          path: metadata.annotations["example.com/owner"]
+          value: data
+      # Per-repo pod metadata adds to, rather than replaces, the shared set.
+      - documentIndex: 3
+        equal:
+          path: spec.template.metadata.labels.tier
+          value: batch
+      - documentIndex: 3
+        equal:
+          path: spec.template.metadata.labels.gpu
+          value: "yes"
+      - documentIndex: 3
+        equal:
+          path: spec.template.metadata.annotations["prometheus.io/scrape"]
+          value: "true"
+      - documentIndex: 3
+        equal:
+          path: spec.template.metadata.annotations["prometheus.io/port"]
+          value: "9100"
+
+  - it: fails when the top-level podLabels sets a chart-owned key
+    template: statefulset-repo.yaml
+    set:
+      podLabels:
+        app.kubernetes.io/name: hijacked
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - failedTemplate:
+          errorMessageRegex: 'podLabels may not set "app.kubernetes.io/name"'
+
+  - it: fails when a repo's annotations override sets the scripts checksum key
+    template: statefulset-repo.yaml
+    set:
+      repos:
+        - org: myorg
+          repo: myrepo
+          annotations:
+            checksum/scripts: hijacked
+    asserts:
+      - failedTemplate:
+          errorMessageRegex: 'repos\[\].annotations may not set "checksum/scripts"'
+
+  - it: fails when a repo's labels override sets the org identity label
+    template: statefulset-repo.yaml
+    set:
+      repos:
+        - org: myorg
+          repo: myrepo
+          labels:
+            cc-rc.io/org: hijacked
+    asserts:
+      - failedTemplate:
+          errorMessageRegex: 'repos\[\].labels may not set "cc-rc.io/org"'

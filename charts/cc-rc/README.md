@@ -320,6 +320,64 @@ proxy:
     minAvailable: 1
 ```
 
+## Custom labels and annotations
+
+Every workload this chart creates takes four extra-metadata knobs: `labels`/
+`annotations` land on the workload object, and `podLabels`/`podAnnotations` land on its
+pods. As with scheduling, there's no single global set — squid and the per-repo agents
+are configured independently.
+
+| | squid Deployment | per-repo agent StatefulSets |
+| --- | --- | --- |
+| workload object labels | `proxy.labels` | `labels`, `repos[].labels` |
+| workload object annotations | `proxy.annotations` | `annotations`, `repos[].annotations` |
+| pod labels | `proxy.podLabels` | `podLabels`, `repos[].podLabels` |
+| pod annotations | `proxy.podAnnotations` | `podAnnotations`, `repos[].podAnnotations` |
+
+The `repos[]` maps are merged **per key** over the top-level default — the same way
+`repos[].resources` deep-merges over `resources` — so a repo can add or replace one
+entry without repeating the shared set:
+
+```yaml
+labels:
+  team: platform
+  cost-center: shared
+podAnnotations:
+  prometheus.io/scrape: "true"
+
+proxy:
+  labels:
+    team: netops
+  podAnnotations:
+    prometheus.io/scrape: "true"
+
+repos:
+  - org: myorg
+    repo: myrepo          # gets team=platform, cost-center=shared
+  - org: myorg
+    repo: gpu-repo
+    labels:
+      team: data          # replaces team; cost-center=shared still applies
+    podAnnotations:
+      prometheus.io/port: "9100"   # added alongside the inherited scrape=true
+```
+
+Two things are deliberately out of scope. Extra metadata is applied to the squid
+Deployment, the per-repo StatefulSets, and the pods of both — not to the Services,
+ConfigMaps, Secrets, NetworkPolicy, PDB, or SSH-key Job. And the chart keeps ownership
+of a fixed set of keys: `app.kubernetes.io/name`, `app.kubernetes.io/instance`,
+`app.kubernetes.io/managed-by`, `app.kubernetes.io/component`, `helm.sh/chart`,
+`cc-rc.io/org`, `cc-rc.io/repo`, `checksum/config` and `checksum/scripts`. Those back
+the (immutable) pod selectors and the config-checksum annotations that roll a workload
+when its ConfigMap changes. Setting one of them from any of the values above fails the
+render with a pointed message rather than being silently dropped:
+
+```
+Error: execution error at (cc-rc/templates/statefulset-repo.yaml:32:33): podLabels may
+not set "app.kubernetes.io/name" - the chart owns that key (pod selectors, the
+app.kubernetes.io/* set, and config checksums). Remove it.
+```
+
 ## Configuring egress
 
 `proxy.allowList` empty (default) = open-web mode: any destination is reachable on
@@ -342,6 +400,7 @@ Pebble entrypoint relay that to its own stdout (otherwise it's only visible via
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | affinity | object | `{}` | Default affinity for every per-repo agent StatefulSet. Override per-repo via `repos[].affinity` (full replace, not merged with this default). |
+| annotations | object | `{}` | Extra annotations added to every per-repo agent StatefulSet object (not its pods). Merged on top of the chart's own annotations. Override/extend per-repo via `repos[].annotations`, which is merged per key over this default. |
 | git | object | `{"autoSetupRemote":true,"colorUi":"auto","defaultBranch":"main","editor":"","email":"","globalIgnore":["*~",".*.swp",".DS_Store","/target","*.egg-info","*.pyc","__pycache__","**/.claude/settings.local.json","**/.claude/worktrees/"],"logDecorate":"short","name":"","pushDefault":"simple"}` | Git identity and global config for the `dev` user inside each agent, rendered into ~/.gitconfig and ~/.gitignore_global via a ConfigMap. Commit signing is intentionally not configured here. |
 | git.autoSetupRemote | bool | `true` | push.autoSetupRemote |
 | git.colorUi | string | `"auto"` | color.ui |
@@ -357,21 +416,28 @@ Pebble entrypoint relay that to its own stdout (otherwise it's only visible via
 | github.secretName | string | `""` | Name of the Secret the chart creates when `tokens` is set. Defaults to "<release>-cc-rc-github-tokens" when left empty. |
 | github.tokens | object | `{}` | Map of org name -> GitHub PAT. Chart creates a Secret from this map (one key per org, keyed by org name) if set. Fine for quick testing, but for anything long-lived prefer `existingSecret` plus `scripts/manage-github-tokens.sh`, which keeps tokens out of values.yaml/git entirely. |
 | image | object | `{"pullPolicy":"Always","repository":"ghcr.io/vince-riv/cc-rc","tag":"latest"}` | Image for the per-repo agent StatefulSets |
+| labels | object | `{}` | Extra labels added to every per-repo agent StatefulSet object (not its pods, not its headless Service). Merged on top of the chart's own labels. Override/extend per-repo via `repos[].labels`, which is merged per key over this default. Keys the chart owns (`app.kubernetes.io/*`, `helm.sh/chart`, `cc-rc.io/org`, `cc-rc.io/repo`, `checksum/*`) are rejected at render time rather than silently ignored. |
 | networkPolicy | object | `{"dns":{"namespace":"kube-system","podSelector":{"k8s-app":"kube-dns"},"port":53},"enabled":true}` | NetworkPolicy that denies all egress from per-repo agent pods except to the squid proxy Service and to cluster DNS. Never applied to the squid Deployment's own pods, which keep unrestricted egress. |
 | networkPolicy.dns.namespace | string | `"kube-system"` | Namespace running the cluster's DNS resolver. |
 | networkPolicy.dns.podSelector | object | `{"k8s-app":"kube-dns"}` | Label selector matching the DNS resolver pods. Varies by distro/cluster (kubeadm/k3s/EKS default to k8s-app=kube-dns; some CoreDNS installs use k8s-app=coredns instead). |
 | nodeSelector | object | `{}` | Default nodeSelector for every per-repo agent StatefulSet. Override per-repo via `repos[].nodeSelector` (full replace, not merged with this default). |
+| podAnnotations | object | `{}` | Extra annotations added to every per-repo agent POD. Merged on top of the chart's own pod annotations. Override/extend per-repo via `repos[].podAnnotations`, which is merged per key over this default. |
 | podFsGroup | int | `1001` | Group ID applied via pod securityContext.fsGroup so freshly-mounted PVCs are writable by the image's non-root `dev` user (created via `useradd -m`, uid/gid 1001). Changing this value re-chowns existing PVCs on their next pod mount (kubelet does this automatically; fsGroupChangePolicy is not set, so it defaults to "Always"). |
-| proxy | object | `{"affinity":{},"allowList":[],"allowedPortsWhenOpen":[80,443,8080,8443,3000,5000,8000,9000],"defaultBlocked":["cluster.local","192.168.0.0/16","10.0.0.0/8","172.16.0.0/12"],"denyList":[],"gracefulShutdownSeconds":45,"image":{"pullPolicy":"Always","repository":"ubuntu/squid","tag":"7.2-26.04_edge"},"nodeSelector":{},"podDisruptionBudget":{"enabled":false,"minAvailable":1},"probes":{"quiet":true},"replicaCount":1,"resources":{},"revisionHistoryLimit":5,"service":{"port":3128,"type":"ClusterIP"},"startupWaitTimeoutSeconds":120,"tolerations":[]}` | Squid egress proxy configuration. |
+| podLabels | object | `{}` | Extra labels added to every per-repo agent POD. Merged on top of the chart's own pod labels. Override/extend per-repo via `repos[].podLabels`, which is merged per key over this default. Setting a label here does not change the StatefulSet's (immutable) pod selector, which always uses the chart's own labels only. |
+| proxy | object | `{"affinity":{},"allowList":[],"allowedPortsWhenOpen":[80,443,8080,8443,3000,5000,8000,9000],"annotations":{},"defaultBlocked":["cluster.local","192.168.0.0/16","10.0.0.0/8","172.16.0.0/12"],"denyList":[],"gracefulShutdownSeconds":45,"image":{"pullPolicy":"Always","repository":"ubuntu/squid","tag":"7.2-26.04_edge"},"labels":{},"nodeSelector":{},"podAnnotations":{},"podDisruptionBudget":{"enabled":false,"minAvailable":1},"podLabels":{},"probes":{"quiet":true},"replicaCount":1,"resources":{},"revisionHistoryLimit":5,"service":{"port":3128,"type":"ClusterIP"},"startupWaitTimeoutSeconds":120,"tolerations":[]}` | Squid egress proxy configuration. |
 | proxy.affinity | object | `{}` | affinity for the squid Deployment. When left empty AND replicaCount > 1, a preferred podAntiAffinity (topologyKey: kubernetes.io/hostname) is generated automatically, spreading squid replicas across nodes. Set this explicitly to take full control instead (it's used as-is, replacing that auto-generation). |
 | proxy.allowList | list | `[]` | Destinations agents are allowed to reach. Each entry is either a domain (e.g. "example.com", or ".example.com" to also match subdomains) or a CIDR (detected by the presence of "/", e.g. "140.82.112.0/20").  When EMPTY: all web traffic is permitted (subject to denyList/defaultBlocked below), on the ports listed in allowedPortsWhenOpen, plus github.com:22 for git+ssh. When NON-EMPTY: only these destinations are reachable (on ports 80/443), plus github.com:22 for git+ssh - that carve-out applies in BOTH modes (agents always clone/push over SSH, tunneled through squid; see sshKey above), unless github.com is itself in denyList. |
 | proxy.allowedPortsWhenOpen | list | `[80,443,8080,8443,3000,5000,8000,9000]` | Ports permitted for any destination when allowList is EMPTY (open-web mode). Ignored in strict allow-list mode (only 80/443 are opened there). |
+| proxy.annotations | object | `{}` | Extra annotations added to the squid Deployment object (not its pods). |
 | proxy.defaultBlocked | list | `["cluster.local","192.168.0.0/16","10.0.0.0/8","172.16.0.0/12"]` | Baked-in destinations that are ALWAYS blocked on top of denyList. Not intended to be overridden — these protect cluster-internal networks. |
 | proxy.denyList | list | `[]` | Destinations that are always blocked, regardless of allow-list mode. Takes precedence over allowList and over the github.com:22 git+ssh carve-out. |
 | proxy.gracefulShutdownSeconds | int | `45` | Seconds squid keeps serving already-open connections after a shutdown signal (squid.conf's shutdown_lifetime), before terminating. Protects in-flight agent traffic (git+ssh, HTTP(S) CONNECT) when a squid replica rolls or scales down. New connections are refused immediately. Set to "0" to disable graceful shutdown. |
+| proxy.labels | object | `{}` | Extra labels added to the squid Deployment object (not its pods, not its Service). Merged on top of the chart's own labels. Chart-owned keys (`app.kubernetes.io/*`, `helm.sh/chart`, `checksum/*`) are rejected at render time rather than silently ignored. |
 | proxy.nodeSelector | object | `{}` | nodeSelector for the squid Deployment. |
+| proxy.podAnnotations | object | `{}` | Extra annotations added to the squid PODS. Merged on top of the chart's own pod annotations (the squid.conf checksum that rolls the Deployment on a config change). |
 | proxy.podDisruptionBudget | object | `{"enabled":false,"minAvailable":1}` | PodDisruptionBudget for the squid Deployment. Only created when `enabled` is true AND `replicaCount` > 1 (a PDB with a single replica just blocks voluntary eviction of the only pod). |
 | proxy.podDisruptionBudget.minAvailable | int | `1` | minAvailable, per the same semantics as PodDisruptionBudgetSpec.minAvailable. |
+| proxy.podLabels | object | `{}` | Extra labels added to the squid PODS. Merged on top of the chart's own pod labels. Setting a label here does not change the Deployment's (immutable) pod selector, which always uses the chart's own labels only. |
 | proxy.probes | object | `{"quiet":true}` | Readiness/liveness probe behavior. The startup probe always uses tcpSocket, regardless of this setting. |
 | proxy.probes.quiet | bool | `true` | When true (default), readiness/liveness probes check for a LISTEN socket via /proc/net/tcp[6] instead of connecting - squid can't log a connection it never saw, so this keeps NONE_NONE/000 error:transaction-end-before-headers noise out of the access log. This is a weaker check than tcpSocket: it confirms squid is listening, not that it's actually accepting connections. Set to false to use tcpSocket instead, at the cost of that log noise on every probe. |
 | proxy.revisionHistoryLimit | int | `5` | Number of old ReplicaSets to keep for rollback (Deployment's revisionHistoryLimit). |
@@ -381,7 +447,7 @@ Pebble entrypoint relay that to its own stdout (otherwise it's only visible via
 | remoteControl.firstBootTimeoutSeconds | int | `900` | Seconds to wait, on first boot (no login-complete marker yet), for a human to finish `claude`'s /login flow before the agent container exits and the pod restarts to retry. Much longer than unhealthyTimeoutSeconds since it's bounding an interactive human step, not a crash. |
 | remoteControl.unhealthyTimeoutSeconds | int | `45` | Seconds `claude remote-control` may be down (never started, or crashed) before the agent container exits, restarting the pod. Kept fairly short by default so a genuine crash self-heals promptly; raise it (e.g. via --set) while debugging a startup failure, since it's also the window you have to `kubectl exec` in and inspect before the container cycles. |
 | remoteControl.worktreeMaxAgeDays | int | `10` | Days of inactivity (no transcript writes) before a `.claude/worktrees/` checkout is removed via `git worktree remove`. Checked once per boot, before remote-control starts. |
-| repos | list | `[]` | One StatefulSet is created per entry. `org`/`repo` are the GitHub org and repo name. Optional per-entry `resources`, `storage`, and `remoteControl` override the defaults below. `resources` is deep-merged over the top-level `resources` default, so a repo can override just cpu or just memory without having to repeat the other. `nodeSelector`/`affinity`, if set, fully replace (not merge with) the top-level `nodeSelector`/`affinity` defaults for that repo's StatefulSet. |
+| repos | list | `[]` | One StatefulSet is created per entry. `org`/`repo` are the GitHub org and repo name. Optional per-entry `resources`, `storage`, and `remoteControl` override the defaults below. `resources` is deep-merged over the top-level `resources` default, so a repo can override just cpu or just memory without having to repeat the other. `nodeSelector`/`affinity`, if set, fully replace (not merge with) the top-level `nodeSelector`/`affinity` defaults for that repo's StatefulSet. Optional per-entry `labels`/`annotations`/`podLabels`/`podAnnotations` are merged (per key) over the top-level `labels`/`annotations`/`podLabels`/`podAnnotations` defaults, so a repo can add one entry without repeating the shared set. |
 | resources | object | `{}` | Default container resources for the per-repo agent container. Empty means no requests/limits are set. |
 | revisionHistoryLimit | int | `5` | Number of old ControllerRevisions to keep for rollback (StatefulSet's revisionHistoryLimit) for each per-repo agent StatefulSet. |
 | sshKey | object | `{"enabled":true,"keyTitle":"cc-rc","resources":{},"secretName":"","tokenOrg":""}` | ED25519 SSH deploy key, generated once by a pre-install/pre-upgrade hook Job and added to a GitHub account (via `gh api /user/keys` - that account's PAT needs the `write:public_key` scope). Every per-repo agent then clones/pushes over SSH using this key instead of an HTTPS URL with an embedded token. SSH keys are account-level, not org-scoped, so ONE key is generated and shared across every repos[] entry - it just needs registering with a token from an account that can reach all of them. |
@@ -409,5 +475,3 @@ helm template cc-rc charts/cc-rc \
 helm unittest charts/cc-rc
 ```
 
-----------------------------------------------
-Autogenerated from chart metadata using [helm-docs v1.14.2](https://github.com/norwoodj/helm-docs/releases/v1.14.2)
