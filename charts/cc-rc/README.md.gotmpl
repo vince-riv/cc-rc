@@ -365,21 +365,40 @@ repos:
       prometheus.io/port: "9100"   # added alongside the inherited scrape=true
 ```
 
-Two things are deliberately out of scope. Extra metadata is applied to the squid
-Deployment, the per-repo StatefulSets, and the pods of both — not to the Services,
-ConfigMaps, Secrets, NetworkPolicy, PDB, or SSH-key Job. And the chart keeps ownership
-of a fixed set of keys: `app.kubernetes.io/name`, `app.kubernetes.io/instance`,
-`app.kubernetes.io/managed-by`, `app.kubernetes.io/component`, `helm.sh/chart`,
-`cc-rc.io/org`, `cc-rc.io/repo`, `checksum/config` and `checksum/scripts`. Those back
-the (immutable) pod selectors and the config-checksum annotations that roll a workload
-when its ConfigMap changes. Setting one of them from any of the values above fails the
-render with a pointed message rather than being silently dropped:
+Values are coerced to strings on the way out, since labels and annotations are
+string-valued in the Kubernetes API — an unquoted `version: 3` or
+`prometheus.io/scrape: true` renders correctly rather than being rejected at apply
+time. One caveat YAML imposes before the chart ever sees the value: a bare `2.0` is
+parsed as a float and renders as `"2"`, so quote such values in `values.yaml`.
+
+Extra metadata is applied to the squid Deployment, the per-repo StatefulSets, and the
+pods of both — not to the Services, ConfigMaps, Secrets, NetworkPolicy, PDB, or SSH-key
+Job.
+
+The chart keeps ownership of the keys it emits, checked **per slot** — a key is only
+reserved where the chart actually writes it:
+
+| slot | chart-owned keys |
+| --- | --- |
+| squid + agent labels, `podLabels` | `app.kubernetes.io/name`, `app.kubernetes.io/instance`, `app.kubernetes.io/managed-by`, `app.kubernetes.io/component`, `helm.sh/chart`, and for agents `cc-rc.io/org`, `cc-rc.io/repo` |
+| `proxy.annotations` | *(none — the chart writes no annotations on the squid Deployment object)* |
+| `proxy.podAnnotations` | `checksum/config` |
+| `annotations`, `repos[].annotations` | `argocd.argoproj.io/sync-wave` |
+| `podAnnotations`, `repos[].podAnnotations` | `checksum/scripts` |
+
+Those keys back the immutable pod selectors, the config-checksum annotations that roll
+a workload when its ConfigMap changes, and the sync-wave hint that orders a first
+ArgoCD sync after squid. Setting one fails the render rather than being silently
+dropped:
 
 ```
 Error: execution error at (cc-rc/templates/statefulset-repo.yaml:32:33): podLabels may
-not set "app.kubernetes.io/name" - the chart owns that key (pod selectors, the
-app.kubernetes.io/* set, and config checksums). Remove it.
+not set "app.kubernetes.io/name" - the chart owns that key and always wins the merge,
+so setting it here would have no effect. Remove it.
 ```
+
+Because the reserved label set is derived from what the chart emits rather than
+hard-coded, renaming an emitted label keeps this guard in step automatically.
 
 ## Configuring egress
 

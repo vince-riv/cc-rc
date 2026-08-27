@@ -5,9 +5,8 @@ metadata:
   labels:
     {{- include "cc-rc.squidLabels" . | nindent 4 }}
   {{- with .Values.proxy.annotations }}
-  {{- include "cc-rc.validateExtraMeta" (dict "values" . "path" "proxy.annotations") }}
   annotations:
-    {{- toYaml . | nindent 4 }}
+    {{- include "cc-rc.squidAnnotations" $ | nindent 4 }}
   {{- end }}
 spec:
   replicas: {{ .Values.proxy.replicaCount }}

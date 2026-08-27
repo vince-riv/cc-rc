@@ -956,17 +956,81 @@ tests:
       - failedTemplate:
           errorMessageRegex: 'podLabels may not set "app.kubernetes.io/name"'
 
-  - it: fails when a repo's annotations override sets the scripts checksum key
+  - it: fails when a repo's podAnnotations override sets the scripts checksum key
     template: statefulset-repo.yaml
     set:
       repos:
         - org: myorg
           repo: myrepo
-          annotations:
+          podAnnotations:
             checksum/scripts: hijacked
     asserts:
       - failedTemplate:
-          errorMessageRegex: 'repos\[\].annotations may not set "checksum/scripts"'
+          errorMessageRegex: 'repos\[\].podAnnotations may not set "checksum/scripts"'
+
+  - it: fails when annotations tries to rewrite the chart-controlled ArgoCD sync wave
+    template: statefulset-repo.yaml
+    set:
+      annotations:
+        argocd.argoproj.io/sync-wave: "5"
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - failedTemplate:
+          errorMessageRegex: 'annotations may not set "argocd.argoproj.io/sync-wave"'
+
+  - it: validates each metadata slot only against the keys the chart emits into that slot
+    template: statefulset-repo.yaml
+    set:
+      # checksum/scripts is a POD annotation, so the chart never emits it onto
+      # the StatefulSet object - setting it there is the user's own business.
+      annotations:
+        checksum/scripts: not-a-collision
+      # ...and the sync wave is an OBJECT annotation, so it is free on the pods.
+      podAnnotations:
+        argocd.argoproj.io/sync-wave: "5"
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - documentIndex: 1
+        equal:
+          path: metadata.annotations["checksum/scripts"]
+          value: not-a-collision
+      - documentIndex: 1
+        equal:
+          path: metadata.annotations["argocd.argoproj.io/sync-wave"]
+          value: "1"
+      - documentIndex: 1
+        equal:
+          path: spec.template.metadata.annotations["argocd.argoproj.io/sync-wave"]
+          value: "5"
+
+  - it: coerces unquoted numeric and boolean metadata values to strings
+    template: statefulset-repo.yaml
+    set:
+      labels:
+        version: 3
+      podAnnotations:
+        prometheus.io/scrape: true
+        prometheus.io/port: 9100
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - documentIndex: 1
+        equal:
+          path: metadata.labels.version
+          value: "3"
+      - documentIndex: 1
+        equal:
+          path: spec.template.metadata.annotations["prometheus.io/scrape"]
+          value: "true"
+      - documentIndex: 1
+        equal:
+          path: spec.template.metadata.annotations["prometheus.io/port"]
+          value: "9100"
 
   - it: fails when a repo's labels override sets the org identity label
     template: statefulset-repo.yaml

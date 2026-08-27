@@ -428,3 +428,33 @@ tests:
     asserts:
       - failedTemplate:
           errorMessageRegex: 'proxy.podAnnotations may not set "checksum/config"'
+
+  - it: leaves proxy.annotations unrestricted, since the Deployment object carries no chart-owned annotations
+    template: deployment-squid.yaml
+    set:
+      proxy.annotations:
+        checksum/config: not-a-collision
+    asserts:
+      - equal:
+          path: metadata.annotations["checksum/config"]
+          value: not-a-collision
+
+  - it: coerces unquoted numeric and boolean metadata values to strings
+    template: deployment-squid.yaml
+    set:
+      proxy.labels:
+        version: 3
+      proxy.annotations:
+        replicas: 2
+      proxy.podAnnotations:
+        prometheus.io/scrape: true
+    asserts:
+      - equal:
+          path: metadata.labels.version
+          value: "3"
+      - equal:
+          path: metadata.annotations.replicas
+          value: "2"
+      - equal:
+          path: spec.template.metadata.annotations["prometheus.io/scrape"]
+          value: "true"
