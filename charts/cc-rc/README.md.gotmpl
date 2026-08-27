@@ -323,6 +323,83 @@ proxy:
     minAvailable: 1
 ```
 
+## Custom labels and annotations
+
+Every workload this chart creates takes four extra-metadata knobs: `labels`/
+`annotations` land on the workload object, and `podLabels`/`podAnnotations` land on its
+pods. As with scheduling, there's no single global set — squid and the per-repo agents
+are configured independently.
+
+| | squid Deployment | per-repo agent StatefulSets |
+| --- | --- | --- |
+| workload object labels | `proxy.labels` | `labels`, `repos[].labels` |
+| workload object annotations | `proxy.annotations` | `annotations`, `repos[].annotations` |
+| pod labels | `proxy.podLabels` | `podLabels`, `repos[].podLabels` |
+| pod annotations | `proxy.podAnnotations` | `podAnnotations`, `repos[].podAnnotations` |
+
+The `repos[]` maps are merged **per key** over the top-level default — the same way
+`repos[].resources` deep-merges over `resources` — so a repo can add or replace one
+entry without repeating the shared set:
+
+```yaml
+labels:
+  team: platform
+  cost-center: shared
+podAnnotations:
+  prometheus.io/scrape: "true"
+
+proxy:
+  labels:
+    team: netops
+  podAnnotations:
+    prometheus.io/scrape: "true"
+
+repos:
+  - org: myorg
+    repo: myrepo          # gets team=platform, cost-center=shared
+  - org: myorg
+    repo: gpu-repo
+    labels:
+      team: data          # replaces team; cost-center=shared still applies
+    podAnnotations:
+      prometheus.io/port: "9100"   # added alongside the inherited scrape=true
+```
+
+Values are coerced to strings on the way out, since labels and annotations are
+string-valued in the Kubernetes API — an unquoted `version: 3` or
+`prometheus.io/scrape: true` renders correctly rather than being rejected at apply
+time. One caveat YAML imposes before the chart ever sees the value: a bare `2.0` is
+parsed as a float and renders as `"2"`, so quote such values in `values.yaml`.
+
+Extra metadata is applied to the squid Deployment, the per-repo StatefulSets, and the
+pods of both — not to the Services, ConfigMaps, Secrets, NetworkPolicy, PDB, or SSH-key
+Job.
+
+The chart keeps ownership of the keys it emits, checked **per slot** — a key is only
+reserved where the chart actually writes it:
+
+| slot | chart-owned keys |
+| --- | --- |
+| squid + agent labels, `podLabels` | `app.kubernetes.io/name`, `app.kubernetes.io/instance`, `app.kubernetes.io/managed-by`, `app.kubernetes.io/component`, `helm.sh/chart`, and for agents `cc-rc.io/org`, `cc-rc.io/repo` |
+| `proxy.annotations` | *(none — the chart writes no annotations on the squid Deployment object)* |
+| `proxy.podAnnotations` | `checksum/config` |
+| `annotations`, `repos[].annotations` | `argocd.argoproj.io/sync-wave` |
+| `podAnnotations`, `repos[].podAnnotations` | `checksum/scripts` |
+
+Those keys back the immutable pod selectors, the config-checksum annotations that roll
+a workload when its ConfigMap changes, and the sync-wave hint that orders a first
+ArgoCD sync after squid. Setting one fails the render rather than being silently
+dropped:
+
+```
+Error: execution error at (cc-rc/templates/statefulset-repo.yaml:32:33): podLabels may
+not set "app.kubernetes.io/name" - the chart owns that key and always wins the merge,
+so setting it here would have no effect. Remove it.
+```
+
+Because the reserved label set is derived from what the chart emits rather than
+hard-coded, renaming an emitted label keeps this guard in step automatically.
+
 ## Configuring egress
 
 `proxy.allowList` empty (default) = open-web mode: any destination is reachable on

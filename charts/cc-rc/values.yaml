@@ -93,7 +93,10 @@ git:
 # below. `resources` is deep-merged over the top-level `resources` default, so a repo
 # can override just cpu or just memory without having to repeat the other.
 # `nodeSelector`/`affinity`, if set, fully replace (not merge with) the top-level
-# `nodeSelector`/`affinity` defaults for that repo's StatefulSet.
+# `nodeSelector`/`affinity` defaults for that repo's StatefulSet. Optional per-entry
+# `labels`/`annotations`/`podLabels`/`podAnnotations` are merged (per key) over the
+# top-level `labels`/`annotations`/`podLabels`/`podAnnotations` defaults, so a repo can
+# add one entry without repeating the shared set.
 repos: []
   # - org: myorg
   #   repo: myrepo
@@ -120,6 +123,47 @@ repos: []
   #     disktype: ssd
   #   affinity: {}
   #   tolerations: []
+  #   labels:
+  #     team: platform
+  #   annotations:
+  #     example.com/owner: platform
+  #   podLabels:
+  #     team: platform
+  #   podAnnotations:
+  #     prometheus.io/scrape: "true"
+
+# -- Extra labels added to every per-repo agent StatefulSet object (not its pods, not
+# its headless Service). Merged on top of the chart's own labels. Override/extend
+# per-repo via `repos[].labels`, which is merged per key over this default. Values are
+# coerced to strings, so an unquoted `version: 3` is safe. The chart-owned label keys
+# (`app.kubernetes.io/*`, `helm.sh/chart`, `cc-rc.io/org`, `cc-rc.io/repo`) are rejected
+# at render time rather than silently ignored.
+labels: {}
+  # team: platform
+
+# -- Extra annotations added to every per-repo agent StatefulSet object (not its pods).
+# Merged on top of the chart's own annotations. Override/extend per-repo via
+# `repos[].annotations`, which is merged per key over this default. Values are coerced
+# to strings. `argocd.argoproj.io/sync-wave` stays chart-controlled and is rejected at
+# render time - it exists to order a first ArgoCD sync after squid.
+annotations: {}
+  # example.com/owner: platform
+
+# -- Extra labels added to every per-repo agent POD. Merged on top of the chart's own
+# pod labels. Override/extend per-repo via `repos[].podLabels`, which is merged per key
+# over this default. Values are coerced to strings. Setting a label here does not change
+# the StatefulSet's (immutable) pod selector, which always uses the chart's own labels
+# only; the chart-owned label keys are rejected at render time.
+podLabels: {}
+  # team: platform
+
+# -- Extra annotations added to every per-repo agent POD. Merged on top of the chart's
+# own pod annotations. Override/extend per-repo via `repos[].podAnnotations`, which is
+# merged per key over this default. Values are coerced to strings, so an unquoted
+# `prometheus.io/scrape: true` is safe. `checksum/scripts` is chart-owned (it rolls the
+# pods when a mounted script changes) and is rejected at render time.
+podAnnotations: {}
+  # prometheus.io/scrape: "true"
 
 # -- Default nodeSelector for every per-repo agent StatefulSet. Override per-repo via
 # `repos[].nodeSelector` (full replace, not merged with this default).
@@ -226,6 +270,32 @@ proxy:
     port: 3128
     type: ClusterIP
   resources: {}
+
+  # -- Extra labels added to the squid Deployment object (not its pods, not its
+  # Service). Merged on top of the chart's own labels. Values are coerced to strings.
+  # The chart-owned label keys (`app.kubernetes.io/*`, `helm.sh/chart`) are rejected at
+  # render time rather than silently ignored.
+  labels: {}
+    # team: platform
+
+  # -- Extra annotations added to the squid Deployment object (not its pods). Values are
+  # coerced to strings. The chart puts no annotations of its own on this object, so no
+  # key is reserved here.
+  annotations: {}
+    # example.com/owner: platform
+
+  # -- Extra labels added to the squid PODS. Merged on top of the chart's own pod
+  # labels. Values are coerced to strings. Setting a label here does not change the
+  # Deployment's (immutable) pod selector, which always uses the chart's own labels
+  # only; the chart-owned label keys are rejected at render time.
+  podLabels: {}
+    # team: platform
+
+  # -- Extra annotations added to the squid PODS. Merged on top of the chart's own pod
+  # annotations. Values are coerced to strings. `checksum/config` is chart-owned (it
+  # rolls the Deployment when squid.conf changes) and is rejected at render time.
+  podAnnotations: {}
+    # prometheus.io/scrape: "true"
 
   # -- nodeSelector for the squid Deployment.
   nodeSelector: {}

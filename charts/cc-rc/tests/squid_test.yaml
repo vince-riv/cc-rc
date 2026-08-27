@@ -348,3 +348,113 @@ tests:
       - matchRegex:
           path: data["squid.conf"]
           pattern: "acl user_deny_cidrs dst 203.0.113.0/24"
+
+  - it: adds proxy.labels/proxy.annotations to the Deployment object only, and proxy.podLabels/proxy.podAnnotations to its pods only
+    template: deployment-squid.yaml
+    set:
+      proxy.labels:
+        team: netops
+      proxy.annotations:
+        example.com/owner: netops
+      proxy.podLabels:
+        tier: edge
+      proxy.podAnnotations:
+        prometheus.io/scrape: "true"
+    asserts:
+      - equal:
+          path: metadata.labels.team
+          value: netops
+      - equal:
+          path: metadata.annotations["example.com/owner"]
+          value: netops
+      # Object-scoped values stay off the pods, and pod-scoped ones off the object.
+      - isNull:
+          path: metadata.labels.tier
+      - isNull:
+          path: metadata.annotations["prometheus.io/scrape"]
+      - equal:
+          path: spec.template.metadata.labels.tier
+          value: edge
+      - equal:
+          path: spec.template.metadata.annotations["prometheus.io/scrape"]
+          value: "true"
+      - isNull:
+          path: spec.template.metadata.labels.team
+      - isNull:
+          path: spec.template.metadata.annotations["example.com/owner"]
+      # Chart-owned metadata survives the merge.
+      - equal:
+          path: metadata.labels["app.kubernetes.io/component"]
+          value: proxy
+      - equal:
+          path: spec.template.metadata.labels["app.kubernetes.io/component"]
+          value: proxy
+      - isNotNull:
+          path: spec.template.metadata.annotations["checksum/config"]
+
+  - it: omits the Deployment annotations block entirely when proxy.annotations is empty
+    template: deployment-squid.yaml
+    asserts:
+      - isNull:
+          path: metadata.annotations
+
+  - it: never lets proxy extra labels reach the immutable pod selector
+    template: deployment-squid.yaml
+    set:
+      proxy.podLabels:
+        tier: edge
+    asserts:
+      - equal:
+          path: spec.selector.matchLabels
+          value:
+            app.kubernetes.io/name: cc-rc
+            app.kubernetes.io/instance: RELEASE-NAME
+            app.kubernetes.io/component: proxy
+
+  - it: fails when proxy.labels sets a chart-owned key
+    template: deployment-squid.yaml
+    set:
+      proxy.labels:
+        app.kubernetes.io/name: hijacked
+    asserts:
+      - failedTemplate:
+          errorMessageRegex: 'proxy.labels may not set "app.kubernetes.io/name"'
+
+  - it: fails when proxy.podAnnotations sets the config checksum key
+    template: deployment-squid.yaml
+    set:
+      proxy.podAnnotations:
+        checksum/config: hijacked
+    asserts:
+      - failedTemplate:
+          errorMessageRegex: 'proxy.podAnnotations may not set "checksum/config"'
+
+  - it: leaves proxy.annotations unrestricted, since the Deployment object carries no chart-owned annotations
+    template: deployment-squid.yaml
+    set:
+      proxy.annotations:
+        checksum/config: not-a-collision
+    asserts:
+      - equal:
+          path: metadata.annotations["checksum/config"]
+          value: not-a-collision
+
+  - it: coerces unquoted numeric and boolean metadata values to strings
+    template: deployment-squid.yaml
+    set:
+      proxy.labels:
+        version: 3
+      proxy.annotations:
+        replicas: 2
+      proxy.podAnnotations:
+        prometheus.io/scrape: true
+    asserts:
+      - equal:
+          path: metadata.labels.version
+          value: "3"
+      - equal:
+          path: metadata.annotations.replicas
+          value: "2"
+      - equal:
+          path: spec.template.metadata.annotations["prometheus.io/scrape"]
+          value: "true"
