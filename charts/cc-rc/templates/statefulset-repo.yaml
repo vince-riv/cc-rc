@@ -26,16 +26,18 @@
 {{- $nodeSelector := $repoEntry.nodeSelector | default $root.Values.nodeSelector }}
 {{- $affinity := $repoEntry.affinity | default $root.Values.affinity }}
 {{- $tolerations := $repoEntry.tolerations | default $root.Values.tolerations }}
+{{- $chartLabels := fromYaml (include "cc-rc.agentChartLabels" (dict "root" $root "repo" $repoEntry)) }}
+{{- $extraLabels := fromYaml (include "cc-rc.agentExtraMeta" (dict "root" $root "repo" $repoEntry "key" "labels")) }}
+{{- $extraAnnotations := fromYaml (include "cc-rc.agentExtraMeta" (dict "root" $root "repo" $repoEntry "key" "annotations")) }}
+{{- $extraPodLabels := fromYaml (include "cc-rc.agentExtraMeta" (dict "root" $root "repo" $repoEntry "key" "podLabels")) }}
+{{- $extraPodAnnotations := fromYaml (include "cc-rc.agentExtraMeta" (dict "root" $root "repo" $repoEntry "key" "podAnnotations")) }}
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: {{ $name }}
   labels:
-    {{- include "cc-rc.labels" $root | nindent 4 }}
-    app.kubernetes.io/component: agent
-    cc-rc.io/org: {{ $repoEntry.org | quote }}
-    cc-rc.io/repo: {{ $repoEntry.repo | quote }}
+    {{- toYaml $chartLabels | nindent 4 }}
 spec:
   clusterIP: None
   selector:
@@ -52,12 +54,9 @@ metadata:
     # ArgoCD-only hint: apply after squid (default wave "0"), so a first
     # sync doesn't race squid's rollout. wait-for-squid.sh below covers the
     # same ordering for non-ArgoCD installs.
-    argocd.argoproj.io/sync-wave: "1"
+    {{- include "cc-rc.mergedMeta" (dict "base" (dict "argocd.argoproj.io/sync-wave" "1") "extra" $extraAnnotations) | nindent 4 }}
   labels:
-    {{- include "cc-rc.labels" $root | nindent 4 }}
-    app.kubernetes.io/component: agent
-    cc-rc.io/org: {{ $repoEntry.org | quote }}
-    cc-rc.io/repo: {{ $repoEntry.repo | quote }}
+    {{- include "cc-rc.mergedMeta" (dict "base" $chartLabels "extra" $extraLabels) | nindent 4 }}
 spec:
   serviceName: {{ $name }}
   replicas: 1
@@ -71,12 +70,10 @@ spec:
   template:
     metadata:
       annotations:
-        checksum/scripts: {{ include (print $.Template.BasePath "/configmap-scripts.yaml") $root | sha256sum }}
+        {{- $scriptsChecksum := include (print $.Template.BasePath "/configmap-scripts.yaml") $root | sha256sum }}
+        {{- include "cc-rc.mergedMeta" (dict "base" (dict "checksum/scripts" $scriptsChecksum) "extra" $extraPodAnnotations) | nindent 8 }}
       labels:
-        {{- include "cc-rc.labels" $root | nindent 8 }}
-        app.kubernetes.io/component: agent
-        cc-rc.io/org: {{ $repoEntry.org | quote }}
-        cc-rc.io/repo: {{ $repoEntry.repo | quote }}
+        {{- include "cc-rc.mergedMeta" (dict "base" $chartLabels "extra" $extraPodLabels) | nindent 8 }}
     spec:
       automountServiceAccountToken: false
       terminationGracePeriodSeconds: {{ $root.Values.terminationGracePeriodSeconds }}

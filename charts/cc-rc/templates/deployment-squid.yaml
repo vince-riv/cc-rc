@@ -3,8 +3,12 @@ kind: Deployment
 metadata:
   name: {{ include "cc-rc.fullname" . }}-squid
   labels:
-    {{- include "cc-rc.labels" . | nindent 4 }}
-    app.kubernetes.io/component: proxy
+    {{- include "cc-rc.squidLabels" . | nindent 4 }}
+  {{- with .Values.proxy.annotations }}
+  {{- include "cc-rc.validateExtraMeta" (dict "values" . "path" "proxy.annotations") }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   replicas: {{ .Values.proxy.replicaCount }}
   revisionHistoryLimit: {{ .Values.proxy.revisionHistoryLimit }}
@@ -15,10 +19,9 @@ spec:
   template:
     metadata:
       annotations:
-        checksum/config: {{ include (print $.Template.BasePath "/configmap-squid.yaml") . | sha256sum }}
+        {{- include "cc-rc.squidPodAnnotations" . | nindent 8 }}
       labels:
-        {{- include "cc-rc.labels" . | nindent 8 }}
-        app.kubernetes.io/component: proxy
+        {{- include "cc-rc.squidPodLabels" . | nindent 8 }}
     spec:
       automountServiceAccountToken: false
       {{- if gt (int .Values.proxy.gracefulShutdownSeconds) 0 }}
