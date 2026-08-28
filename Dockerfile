@@ -73,6 +73,12 @@ RUN --mount=type=bind,source=scripts/setup-go-containerregistry.sh,target=/opt/b
     --mount=type=tmpfs,target=/tmp \
     bash /opt/build-scripts/setup-go-containerregistry.sh
 
+# Node 22/24/26 via update-alternatives, prebuilt from nodejs.org — see
+# scripts/setup-node.sh for why this replaced `nvm install` as `dev`.
+RUN --mount=type=bind,source=scripts/setup-node.sh,target=/opt/build-scripts/setup-node.sh \
+    --mount=type=tmpfs,target=/tmp \
+    bash /opt/build-scripts/setup-node.sh
+
 # Helm, plus helm-docs.
 RUN --mount=type=bind,source=scripts/setup-helm.sh,target=/opt/build-scripts/setup-helm.sh \
     --mount=type=tmpfs,target=/tmp \

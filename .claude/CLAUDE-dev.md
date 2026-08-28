@@ -15,6 +15,16 @@ This image ships Go 1.25 and 1.26, managed by `update-alternatives`. Plain
 `go` on `PATH` resolves to 1.26 (the default). To use 1.25 instead, call it
 directly: `/usr/lib/go-1.25/bin/go`.
 
+## Node versions
+
+This image ships Node 22, 24, and 26 as prebuilt binaries under
+`/usr/local/node-<major>/`, managed by `update-alternatives`. Plain `node`
+on `PATH` resolves to 26 (the default). To use 22 or 24 instead, call them
+directly — `/usr/local/node-22/bin/node` or `/usr/local/node-24/bin/node`
+— or use `nvm use 22`/`nvm use 24`: `nvm` is installed too, and all three
+versions are pre-registered with it (as symlinks to the same
+`/usr/local/node-<major>/` install, not a separate download).
+
 ## 0. Hard rules
 
 - NEVER push to `main` or `master`. ALWAYS work on a branch and open a PR.

@@ -8,6 +8,18 @@
     {
       "matchDepNames": ["ubuntu/squid"],
       "enabled": false
+    },
+    {
+      "matchDepNames": ["node-22"],
+      "allowedVersions": "/^v?22\\./"
+    },
+    {
+      "matchDepNames": ["node-24"],
+      "allowedVersions": "/^v?24\\./"
+    },
+    {
+      "matchDepNames": ["node-26"],
+      "allowedVersions": "/^v?26\\./"
     }
   ],
   "customManagers": [

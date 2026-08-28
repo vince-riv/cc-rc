@@ -50,16 +50,26 @@ cat > ~/.claude/settings.json <<'EOF'
 }
 EOF
 
-# nvm, plus node 22/24/26 — 26 is nvm's default.
+# nvm itself, for anything that expects `nvm use`/.nvmrc to work. The
+# actual node 22/24/26 binaries are NOT downloaded here — they're already
+# installed system-wide under /usr/local/node-<major>/ (setup-node.sh, run
+# as root earlier in the Dockerfile). Symlinking them into nvm's version
+# directory "registers" them with nvm without a second download/extract,
+# which is what used to make ~/.nvm hundreds of MB bigger than it needed
+# to be.
 # renovate: datasource=github-releases depName=nvm-sh/nvm
 NVM_VERSION=v0.40.7
 curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 \
     "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh" | bash
 \. "$HOME/.nvm/nvm.sh"
 nvm --version
-nvm install 22
-nvm install 24
-nvm install 26
+
+mkdir -p "$NVM_DIR/versions/node"
+for major in 22 24 26; do
+    full_version="$("/usr/local/node-${major}/bin/node" --version)"
+    ln -sfn "/usr/local/node-${major}" "$NVM_DIR/versions/node/${full_version}"
+done
 nvm alias default 26
+nvm use default
 node -v
 npm -v
