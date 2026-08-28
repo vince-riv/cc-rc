@@ -82,3 +82,15 @@ nvm alias default "${default_version}"
 nvm use default
 node -v
 npm -v
+
+# Build-time smoke test: nvm must actually recognize each registered
+# version, not just have a directory with a working binary sitting in it -
+# `nvm ls` alone wouldn't have caught the symlinked-directory bug above,
+# since that only lists what nvm sees. Running node THROUGH nvm for each
+# version is what proves `nvm use`/`nvm exec` work, so check it every
+# build instead of only after it breaks.
+nvm ls
+for major in 22 24 26; do
+    echo "== node ${major} via nvm =="
+    nvm exec "${major}" node --version
+done
