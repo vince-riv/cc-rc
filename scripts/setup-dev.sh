@@ -65,11 +65,20 @@ curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 \
 nvm --version
 
 mkdir -p "$NVM_DIR/versions/node"
+default_version=""
 for major in 22 24 26; do
     full_version="$("/usr/local/node-${major}/bin/node" --version)"
-    ln -sfn "/usr/local/node-${major}" "$NVM_DIR/versions/node/${full_version}"
+    version_dir="$NVM_DIR/versions/node/${full_version}"
+    # A symlinked version_dir itself doesn't work here: nvm's own version
+    # scan looks for real directories and skips symlinks, so it would
+    # report the version as "not installed" despite the binary working
+    # fine. Make the directory real, symlink its contents instead — same
+    # near-zero extra space, but nvm's scan sees it.
+    mkdir -p "${version_dir}"
+    ln -sfn "/usr/local/node-${major}"/* "${version_dir}/"
+    [ "${major}" = "26" ] && default_version="${full_version}"
 done
-nvm alias default 26
+nvm alias default "${default_version}"
 nvm use default
 node -v
 npm -v
