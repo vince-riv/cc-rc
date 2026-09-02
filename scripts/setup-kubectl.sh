@@ -4,7 +4,7 @@ set -euo pipefail
 # kubectl isn't in Ubuntu's apt repos at all, so it's fetched straight from
 # the official release, checksum-verified — same pattern as gh/crane.
 # renovate: datasource=github-releases depName=kubernetes/kubernetes
-KUBECTL_VERSION=v1.36.4
+KUBECTL_VERSION=v1.37.0
 arch="$(dpkg --print-architecture)"
 
 curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o /tmp/kubectl \
