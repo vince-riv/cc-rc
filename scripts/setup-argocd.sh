@@ -4,7 +4,7 @@ set -euo pipefail
 # argocd isn't in Ubuntu's apt repos at all, so it's fetched straight from
 # the GitHub release, checksum-verified.
 # renovate: datasource=github-releases depName=argoproj/argo-cd
-ARGOCD_VERSION=v3.5.1
+ARGOCD_VERSION=v3.5.2
 
 case "$(dpkg --print-architecture)" in
     amd64) arch=amd64 ;;
