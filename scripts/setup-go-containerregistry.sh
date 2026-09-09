@@ -6,7 +6,7 @@ set -euo pipefail
 # install` won't honor outside the main module, so crane is built the same
 # way for consistency.
 # renovate: datasource=github-releases depName=google/go-containerregistry
-GO_CONTAINERREGISTRY_VERSION=v0.21.9
+GO_CONTAINERREGISTRY_VERSION=v0.22.0
 
 case "$(dpkg --print-architecture)" in
     amd64) arch=x86_64 ;;
