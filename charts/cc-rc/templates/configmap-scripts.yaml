@@ -19,3 +19,11 @@ data:
     {{- .Files.Get "files/scripts/bash-prompt-hook.sh" | nindent 4 }}
   create-ssh-key.sh: |
     {{- .Files.Get "files/scripts/create-ssh-key.sh" | nindent 4 }}
+  {{- $root := . }}
+  {{- range $repoEntry := .Values.repos }}
+  {{- $content := include "cc-rc.customScriptContent" (dict "root" $root "repo" $repoEntry) }}
+  {{- if $content }}
+  custom-script-{{ include "cc-rc.repoSlug" $repoEntry }}.sh: |
+    {{- $content | nindent 4 }}
+  {{- end }}
+  {{- end }}

@@ -759,6 +759,96 @@ tests:
           path: spec.template.spec.terminationGracePeriodSeconds
           value: 120
 
+  - it: CUSTOM_SCRIPT_FILE is empty and no envFrom is set when customScript.content is unset
+    template: statefulset-repo.yaml
+    set:
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CUSTOM_SCRIPT_FILE
+            value: ""
+      - documentIndex: 1
+        notExists:
+          path: spec.template.spec.containers[0].envFrom
+
+  - it: sets CUSTOM_SCRIPT_FILE and wires env/envFrom onto the agent container when customScript.content is set
+    template: statefulset-repo.yaml
+    set:
+      customScript:
+        content: |
+          echo hi
+        env:
+          - name: FOO
+            value: bar
+        envFrom:
+          - secretRef:
+              name: my-secret
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CUSTOM_SCRIPT_FILE
+            value: "custom-script-myorg-myrepo.sh"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: FOO
+            value: bar
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.containers[0].envFrom
+          value:
+            - secretRef:
+                name: my-secret
+
+  - it: a repo's customScript.content/env/envFrom each independently fall back to the top-level default when unset
+    template: statefulset-repo.yaml
+    set:
+      customScript:
+        content: |
+          echo shared
+        env:
+          - name: SHARED
+            value: "1"
+      repos:
+        - org: myorg
+          repo: myrepo
+          customScript:
+            env:
+              - name: ONLY_MYREPO
+                value: "1"
+    asserts:
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CUSTOM_SCRIPT_FILE
+            # content still falls back to the top-level default since this
+            # repo's customScript only sets `env`.
+            value: "custom-script-myorg-myrepo.sh"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ONLY_MYREPO
+            value: "1"
+      - documentIndex: 1
+        notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SHARED
+            value: "1"
+
   - it: fails when remoteControl.permissionMode is not a recognized value
     template: statefulset-repo.yaml
     set:

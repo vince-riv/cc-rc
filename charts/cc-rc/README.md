@@ -54,8 +54,9 @@ repo, each behind a locked-down [Squid](https://www.squid-cache.org/) egress pro
   `image.repository`/`image.tag` only needs to provide the underlying tools (`claude`,
   `screen`, `git`, `rsync`, `ssh-keygen`, `connect` (from `connect-proxy`), `gh`,
   `kubectl`), not this orchestration
-  logic. A `checksum/scripts` pod annotation rolls the `StatefulSet`s on any script
-  change.
+  logic — plus one `custom-script-<org-repo-slug>.sh` key per `repos[]` entry that sets
+  `customScript.content` (see "Running a custom script before claude" below). A
+  `checksum/scripts` pod annotation rolls the `StatefulSet`s on any script change.
 
 ## Installing
 
@@ -128,6 +129,59 @@ repos:
       requests:
         cpu: "2"          # memory still comes from the default above
 ```
+
+## Running a custom script before claude
+
+`customScript.content` is an inline shell script run once per boot in the agent
+container, right before claude ever runs — covers both the auth warm-up `claude` call
+and `claude remote-control` itself — but only on a steady-state boot (skipped on the
+first-time interactive login boot). It runs with CWD at `/workspace/repo` (the
+already-cloned repo). A non-zero exit fails pod startup, the same as a worktree-prune
+format mismatch, so build in your own error handling for anything non-fatal:
+
+```yaml
+customScript:
+  content: |
+    npm ci --prefix /workspace/repo
+```
+
+`customScript.env`/`customScript.envFrom` add to the agent container's own `env`/
+`envFrom` — so they reach the custom script, the `claude` warm-up run, and `claude
+remote-control` alike (Kubernetes has no way to scope env to just one step inside a
+container):
+
+```yaml
+customScript:
+  content: |
+    npm ci --prefix /workspace/repo
+  env:
+    - name: NPM_TOKEN
+      valueFrom:
+        secretKeyRef:
+          name: my-secret
+          key: npm-token
+  envFrom:
+    - secretRef:
+        name: another-secret
+```
+
+Overridable per-repo via `repos[].customScript` — `content`/`env`/`envFrom` each fall
+back to the top-level default independently when unset at the repo level (the same way
+`repos[].remoteControl.*` falls back to `remoteControl.*`), so a repo can add its own
+env vars while keeping the shared script, or run a completely different script while
+keeping the shared env:
+
+```yaml
+repos:
+  - org: myorg
+    repo: myrepo
+    customScript:
+      content: |
+        bundle install
+```
+
+Leaving `customScript.content` (and any per-repo override) empty — the default — skips
+the whole step: no extra `ConfigMap` key, no `CUSTOM_SCRIPT_FILE` env var set.
 
 ## Configuring git identity
 
@@ -420,6 +474,10 @@ Pebble entrypoint relay that to its own stdout (otherwise it's only visible via
 |-----|------|---------|-------------|
 | affinity | object | `{}` | Default affinity for every per-repo agent StatefulSet. Override per-repo via `repos[].affinity` (full replace, not merged with this default). |
 | annotations | object | `{}` | Extra annotations added to every per-repo agent StatefulSet object (not its pods). Merged on top of the chart's own annotations. Override/extend per-repo via `repos[].annotations`, which is merged per key over this default. Values are coerced to strings. `argocd.argoproj.io/sync-wave` stays chart-controlled and is rejected at render time - it exists to order a first ArgoCD sync after squid. |
+| customScript | object | `{"content":"","env":[],"envFrom":[]}` | Custom script run once per boot in the agent container, right before claude ever runs - covers both the auth warm-up `claude` call and `claude remote-control` itself - but only on a steady-state boot (skipped on the first-time interactive login boot). Runs with CWD at /workspace/repo (the already-cloned repo). A non-zero exit fails pod startup, same as a worktree-prune format mismatch, so build in your own error handling for anything non-fatal. Overridable per-repo via `repos[].customScript` - `content`/`env`/`envFrom` each fall back to this default independently when unset at the repo level, the same way `repos[].remoteControl` works. |
+| customScript.content | string | `""` | Inline shell script content. Empty (default) skips the custom-script step entirely - no extra ConfigMap key, no CUSTOM_SCRIPT_FILE set. |
+| customScript.env | list | `[]` | Extra env vars added to the agent container - so they reach the custom script, the `claude` warm-up run, and `claude remote-control` alike (Kubernetes has no way to scope env to just one step in a container). Same shape as a container's `env`; supports `valueFrom`. |
+| customScript.envFrom | list | `[]` | Extra envFrom added to the agent container, for the same reason as `env` above. Same shape as a container's `envFrom`. |
 | git | object | `{"autoSetupRemote":true,"colorUi":"auto","defaultBranch":"main","editor":"","email":"","globalIgnore":["*~",".*.swp",".DS_Store","/target","*.egg-info","*.pyc","__pycache__","**/.claude/settings.local.json","**/.claude/worktrees/"],"logDecorate":"short","name":"","pushDefault":"simple"}` | Git identity and global config for the `dev` user inside each agent, rendered into ~/.gitconfig and ~/.gitignore_global via a ConfigMap. Commit signing is intentionally not configured here. |
 | git.autoSetupRemote | bool | `true` | push.autoSetupRemote |
 | git.colorUi | string | `"auto"` | color.ui |

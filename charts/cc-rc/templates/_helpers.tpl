@@ -87,6 +87,25 @@ deploy key with - sshKey.tokenOrg if set, else repos[0].org.
 {{- end -}}
 
 {{/*
+Effective custom-script content for one repo: repos[].customScript.content if
+set, else the top-level customScript.content default. Pass `root` and `repo`.
+*/}}
+{{- define "cc-rc.customScriptContent" -}}
+{{- $cs := .repo.customScript | default dict -}}
+{{- $cs.content | default .root.Values.customScript.content -}}
+{{- end -}}
+
+{{/*
+ConfigMap key holding one repo's rendered custom script, or "" if it has none
+(effective content is empty - the default). Pass `root` and `repo`.
+*/}}
+{{- define "cc-rc.customScriptFile" -}}
+{{- if include "cc-rc.customScriptContent" . -}}
+{{- printf "custom-script-%s.sh" (include "cc-rc.repoSlug" .repo) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Fully qualified squid Service name.
 */}}
 {{- define "cc-rc.squidServiceName" -}}

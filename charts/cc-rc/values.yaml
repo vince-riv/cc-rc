@@ -119,6 +119,15 @@ repos: []
   #     unhealthyTimeoutSeconds: 45
   #     firstBootTimeoutSeconds: 900
   #     worktreeMaxAgeDays: 10
+  #   customScript:
+  #     content: |
+  #       npm ci --prefix /workspace/repo
+  #     env:
+  #       - name: FOO
+  #         value: bar
+  #     envFrom:
+  #       - secretRef:
+  #           name: my-secret
   #   nodeSelector:
   #     disktype: ssd
   #   affinity: {}
@@ -220,6 +229,43 @@ remoteControl:
   # checkout is removed via `git worktree remove`. Checked once per boot,
   # before remote-control starts.
   worktreeMaxAgeDays: 10
+
+# -- Custom script run once per boot in the agent container, right before
+# claude ever runs - covers both the auth warm-up `claude` call and `claude
+# remote-control` itself - but only on a steady-state boot (skipped on the
+# first-time interactive login boot). Runs with CWD at /workspace/repo (the
+# already-cloned repo). A non-zero exit fails pod startup, same as a
+# worktree-prune format mismatch, so build in your own error handling for
+# anything non-fatal. Overridable per-repo via `repos[].customScript` -
+# `content`/`env`/`envFrom` each fall back to this default independently when
+# unset at the repo level, the same way `repos[].remoteControl` works.
+customScript:
+  # -- Inline shell script content. Empty (default) skips the custom-script
+  # step entirely - no extra ConfigMap key, no CUSTOM_SCRIPT_FILE set.
+  content: ""
+  # content: |
+  #   npm ci --prefix /workspace/repo
+  # -- Extra env vars added to the agent container - so they reach the
+  # custom script, the `claude` warm-up run, and `claude remote-control`
+  # alike (Kubernetes has no way to scope env to just one step in a
+  # container). Same shape as a container's `env`; supports `valueFrom`.
+  env: []
+  # env:
+  #   - name: FOO
+  #     value: bar
+  #   - name: NPM_TOKEN
+  #     valueFrom:
+  #       secretKeyRef:
+  #         name: my-secret
+  #         key: npm-token
+  # -- Extra envFrom added to the agent container, for the same reason as
+  # `env` above. Same shape as a container's `envFrom`.
+  envFrom: []
+  # envFrom:
+  #   - secretRef:
+  #       name: my-secret
+  #   - configMapRef:
+  #       name: my-configmap
 
 # -- Seconds kubelet waits after sending SIGTERM before sending SIGKILL to the
 # agent container. Raised above Kubernetes' 30s default so claude has real
