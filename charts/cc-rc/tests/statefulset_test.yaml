@@ -849,7 +849,7 @@ tests:
             name: SHARED
             value: "1"
 
-  - it: two repos with identical customScript.content get the same checksum/scripts (proves the hash is a pure function of static scripts + own content, not e.g. the repo name)
+  - it: two repos with identical customScript.content get the exact same checksum/scripts (pinned digests, not just isNotNull, so the assertion actually compares the two - helm-unittest can't compare one path against another directly)
     template: statefulset-repo.yaml
     set:
       repos:
@@ -863,12 +863,18 @@ tests:
           customScript:
             content: *sharedCustomScriptContent
     asserts:
+      # Pinned to the actual digest cc-rc.agentScriptsChecksum produces for
+      # this exact input at the time this test was written - update it
+      # (re-render and copy the new value) if a static script under
+      # files/scripts/ intentionally changes.
       - documentIndex: 1
-        isNotNull:
+        equal:
           path: spec.template.metadata.annotations["checksum/scripts"]
+          value: "1fe4d81e69d51fc00c0a004a0ceb5620c9c29ba345a1da81db4755b74c5b4ffa"
       - documentIndex: 3
-        isNotNull:
+        equal:
           path: spec.template.metadata.annotations["checksum/scripts"]
+          value: "1fe4d81e69d51fc00c0a004a0ceb5620c9c29ba345a1da81db4755b74c5b4ffa"
 
   - it: fails when remoteControl.permissionMode is not a recognized value
     template: statefulset-repo.yaml
