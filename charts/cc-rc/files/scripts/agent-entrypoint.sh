@@ -129,6 +129,10 @@ prune_stale_worktrees() {
 # configured for this repo). Runs with CWD at /workspace/repo; a non-zero
 # exit fails pod startup, same as a worktree-prune format mismatch, so build
 # in your own error handling for anything non-fatal.
+# bash -l (not a bare bash): same trap the warm-up run below documents -
+# ~/.local/bin only reaches PATH via /etc/profile.d, which needs a login
+# shell. Without -l, a script calling claude/rescue-sessions.sh/nvm fails
+# with "command not found" and crash-loops the pod via the exit 1 below.
 run_custom_script() {
   [ -n "${CUSTOM_SCRIPT_FILE:-}" ] || return 0
   script="/opt/cc-rc/scripts/${CUSTOM_SCRIPT_FILE}"
@@ -137,7 +141,7 @@ run_custom_script() {
     exit 1
   fi
   echo "Running custom script ($script) before starting claude..."
-  if ! (cd /workspace/repo && bash "$script"); then
+  if ! (cd /workspace/repo && bash -l "$script"); then
     echo "FATAL: custom script ($script) exited non-zero - aborting startup." >&2
     exit 1
   fi

@@ -214,7 +214,10 @@ tests:
           pattern: 'FATAL: CUSTOM_SCRIPT_FILE=\$CUSTOM_SCRIPT_FILE set but \$script is missing\.'
       - matchRegex:
           path: data["agent-entrypoint.sh"]
-          pattern: 'cd /workspace/repo && bash "\$script"'
+          # -l (login shell): without it ~/.local/bin never reaches PATH, so
+          # a script calling claude/rescue-sessions.sh/nvm would fail with
+          # "command not found" - same trap the warm-up run below documents.
+          pattern: 'cd /workspace/repo && bash -l "\$script"'
       - matchRegex:
           path: data["agent-entrypoint.sh"]
           # a non-zero exit from the custom script also fails pod startup.
@@ -288,6 +291,26 @@ tests:
       - notMatchRegex:
           path: data["custom-script-myorg-myrepo.sh"]
           pattern: 'shared setup'
+
+  - it: a repo's explicit customScript.content=="" opts out of an inherited top-level script, instead of falling back to it
+    set:
+      github:
+        tokens:
+          myorg: dummy-token
+      git:
+        name: CI Bot
+        email: ci@example.com
+      customScript:
+        content: |
+          echo "shared setup"
+      repos:
+        - org: myorg
+          repo: myrepo
+          customScript:
+            content: ""
+    asserts:
+      - notExists:
+          path: data["custom-script-myorg-myrepo.sh"]
 
   - it: bash-prompt-hook.sh prints login instructions once and defines cc-rc-finish-login
     asserts:

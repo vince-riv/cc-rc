@@ -148,7 +148,9 @@ customScript:
 `customScript.env`/`customScript.envFrom` add to the agent container's own `env`/
 `envFrom` — so they reach the custom script, the `claude` warm-up run, and `claude
 remote-control` alike (Kubernetes has no way to scope env to just one step inside a
-container):
+container). **Security note:** anything set here is therefore also readable by `claude
+remote-control` and by any code it runs, including a PR branch it checks out — don't use
+this for a secret meant only for the setup step:
 
 ```yaml
 customScript:
@@ -166,10 +168,10 @@ customScript:
 ```
 
 Overridable per-repo via `repos[].customScript` — `content`/`env`/`envFrom` each fall
-back to the top-level default independently when unset at the repo level (the same way
-`repos[].remoteControl.*` falls back to `remoteControl.*`), so a repo can add its own
-env vars while keeping the shared script, or run a completely different script while
-keeping the shared env:
+back to the top-level default independently when the repo doesn't set that key at all
+(the same way `repos[].remoteControl.*` falls back to `remoteControl.*`), so a repo can
+add its own env vars while keeping the shared script, or run a completely different
+script while keeping the shared env:
 
 ```yaml
 repos:
@@ -180,8 +182,27 @@ repos:
         bundle install
 ```
 
-Leaving `customScript.content` (and any per-repo override) empty — the default — skips
-the whole step: no extra `ConfigMap` key, no `CUSTOM_SCRIPT_FILE` env var set.
+Setting `repos[].customScript.content: ""` explicitly, though, opts that repo out of an
+inherited top-level script rather than falling back to it — the one case where an empty
+value means something different from "unset":
+
+```yaml
+customScript:
+  content: |
+    npm ci --prefix /workspace/repo
+
+repos:
+  - org: myorg
+    repo: myrepo          # runs the shared npm ci script
+  - org: myorg
+    repo: no-setup-needed
+    customScript:
+      content: ""          # opts out - no custom script runs for this repo
+```
+
+Leaving `customScript.content` empty at the top level, with no per-repo override at all,
+skips the whole step for every repo: no extra `ConfigMap` key, no `CUSTOM_SCRIPT_FILE`
+env var set.
 
 ## Configuring git identity
 
@@ -474,9 +495,9 @@ Pebble entrypoint relay that to its own stdout (otherwise it's only visible via
 |-----|------|---------|-------------|
 | affinity | object | `{}` | Default affinity for every per-repo agent StatefulSet. Override per-repo via `repos[].affinity` (full replace, not merged with this default). |
 | annotations | object | `{}` | Extra annotations added to every per-repo agent StatefulSet object (not its pods). Merged on top of the chart's own annotations. Override/extend per-repo via `repos[].annotations`, which is merged per key over this default. Values are coerced to strings. `argocd.argoproj.io/sync-wave` stays chart-controlled and is rejected at render time - it exists to order a first ArgoCD sync after squid. |
-| customScript | object | `{"content":"","env":[],"envFrom":[]}` | Custom script run once per boot in the agent container, right before claude ever runs - covers both the auth warm-up `claude` call and `claude remote-control` itself - but only on a steady-state boot (skipped on the first-time interactive login boot). Runs with CWD at /workspace/repo (the already-cloned repo). A non-zero exit fails pod startup, same as a worktree-prune format mismatch, so build in your own error handling for anything non-fatal. Overridable per-repo via `repos[].customScript` - `content`/`env`/`envFrom` each fall back to this default independently when unset at the repo level, the same way `repos[].remoteControl` works. |
+| customScript | object | `{"content":"","env":[],"envFrom":[]}` | Custom script run once per boot in the agent container, right before claude ever runs - covers both the auth warm-up `claude` call and `claude remote-control` itself - but only on a steady-state boot (skipped on the first-time interactive login boot). Runs with CWD at /workspace/repo (the already-cloned repo). A non-zero exit fails pod startup, same as a worktree-prune format mismatch, so build in your own error handling for anything non-fatal. Overridable per-repo via `repos[].customScript` - `content`/`env`/`envFrom` each fall back to this default independently when the repo doesn't set that key at all, the same way `repos[].remoteControl` works - but setting `repos[].customScript.content: ""` explicitly disables an inherited top-level script for that repo, rather than falling back. |
 | customScript.content | string | `""` | Inline shell script content. Empty (default) skips the custom-script step entirely - no extra ConfigMap key, no CUSTOM_SCRIPT_FILE set. |
-| customScript.env | list | `[]` | Extra env vars added to the agent container - so they reach the custom script, the `claude` warm-up run, and `claude remote-control` alike (Kubernetes has no way to scope env to just one step in a container). Same shape as a container's `env`; supports `valueFrom`. |
+| customScript.env | list | `[]` | Extra env vars added to the agent container - so they reach the custom script, the `claude` warm-up run, and `claude remote-control` alike (Kubernetes has no way to scope env to just one step in a container). Same shape as a container's `env`; supports `valueFrom`. SECURITY: anything set here (e.g. a build-step token) is readable by claude remote-control and by any code it runs, including a PR branch it checks out - don't use this for a secret scoped to just the setup step. |
 | customScript.envFrom | list | `[]` | Extra envFrom added to the agent container, for the same reason as `env` above. Same shape as a container's `envFrom`. |
 | git | object | `{"autoSetupRemote":true,"colorUi":"auto","defaultBranch":"main","editor":"","email":"","globalIgnore":["*~",".*.swp",".DS_Store","/target","*.egg-info","*.pyc","__pycache__","**/.claude/settings.local.json","**/.claude/worktrees/"],"logDecorate":"short","name":"","pushDefault":"simple"}` | Git identity and global config for the `dev` user inside each agent, rendered into ~/.gitconfig and ~/.gitignore_global via a ConfigMap. Commit signing is intentionally not configured here. |
 | git.autoSetupRemote | bool | `true` | push.autoSetupRemote |

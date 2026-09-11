@@ -74,7 +74,11 @@ spec:
   template:
     metadata:
       annotations:
-        {{- $scriptsChecksum := include (print $.Template.BasePath "/configmap-scripts.yaml") $root | sha256sum }}
+        {{- /* Hashes only the static scripts plus THIS repo's own
+           customScript content - not the whole scripts ConfigMap, which
+           holds every repo's custom script and would otherwise roll every
+           repo's pods whenever any one repo's customScript changed. */ -}}
+        {{- $scriptsChecksum := include "cc-rc.agentScriptsChecksum" (dict "root" $root "repo" $repoEntry) }}
         {{- include "cc-rc.mergedMeta" (dict "base" (dict "checksum/scripts" $scriptsChecksum) "extra" $extraPodAnnotations) | nindent 8 }}
       labels:
         {{- include "cc-rc.mergedMeta" (dict "base" $chartLabels "extra" $extraPodLabels) | nindent 8 }}

@@ -151,7 +151,9 @@ customScript:
 `customScript.env`/`customScript.envFrom` add to the agent container's own `env`/
 `envFrom` — so they reach the custom script, the `claude` warm-up run, and `claude
 remote-control` alike (Kubernetes has no way to scope env to just one step inside a
-container):
+container). **Security note:** anything set here is therefore also readable by `claude
+remote-control` and by any code it runs, including a PR branch it checks out — don't use
+this for a secret meant only for the setup step:
 
 ```yaml
 customScript:
@@ -169,10 +171,10 @@ customScript:
 ```
 
 Overridable per-repo via `repos[].customScript` — `content`/`env`/`envFrom` each fall
-back to the top-level default independently when unset at the repo level (the same way
-`repos[].remoteControl.*` falls back to `remoteControl.*`), so a repo can add its own
-env vars while keeping the shared script, or run a completely different script while
-keeping the shared env:
+back to the top-level default independently when the repo doesn't set that key at all
+(the same way `repos[].remoteControl.*` falls back to `remoteControl.*`), so a repo can
+add its own env vars while keeping the shared script, or run a completely different
+script while keeping the shared env:
 
 ```yaml
 repos:
@@ -183,8 +185,27 @@ repos:
         bundle install
 ```
 
-Leaving `customScript.content` (and any per-repo override) empty — the default — skips
-the whole step: no extra `ConfigMap` key, no `CUSTOM_SCRIPT_FILE` env var set.
+Setting `repos[].customScript.content: ""` explicitly, though, opts that repo out of an
+inherited top-level script rather than falling back to it — the one case where an empty
+value means something different from "unset":
+
+```yaml
+customScript:
+  content: |
+    npm ci --prefix /workspace/repo
+
+repos:
+  - org: myorg
+    repo: myrepo          # runs the shared npm ci script
+  - org: myorg
+    repo: no-setup-needed
+    customScript:
+      content: ""          # opts out - no custom script runs for this repo
+```
+
+Leaving `customScript.content` empty at the top level, with no per-repo override at all,
+skips the whole step for every repo: no extra `ConfigMap` key, no `CUSTOM_SCRIPT_FILE`
+env var set.
 
 ## Configuring git identity
 

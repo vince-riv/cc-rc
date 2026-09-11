@@ -238,7 +238,9 @@ remoteControl:
 # worktree-prune format mismatch, so build in your own error handling for
 # anything non-fatal. Overridable per-repo via `repos[].customScript` -
 # `content`/`env`/`envFrom` each fall back to this default independently when
-# unset at the repo level, the same way `repos[].remoteControl` works.
+# the repo doesn't set that key at all, the same way `repos[].remoteControl`
+# works - but setting `repos[].customScript.content: ""` explicitly disables
+# an inherited top-level script for that repo, rather than falling back.
 customScript:
   # -- Inline shell script content. Empty (default) skips the custom-script
   # step entirely - no extra ConfigMap key, no CUSTOM_SCRIPT_FILE set.
@@ -249,6 +251,9 @@ customScript:
   # custom script, the `claude` warm-up run, and `claude remote-control`
   # alike (Kubernetes has no way to scope env to just one step in a
   # container). Same shape as a container's `env`; supports `valueFrom`.
+  # SECURITY: anything set here (e.g. a build-step token) is readable by
+  # claude remote-control and by any code it runs, including a PR branch it
+  # checks out - don't use this for a secret scoped to just the setup step.
   env: []
   # env:
   #   - name: FOO

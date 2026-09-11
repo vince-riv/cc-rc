@@ -849,6 +849,27 @@ tests:
             name: SHARED
             value: "1"
 
+  - it: two repos with identical customScript.content get the same checksum/scripts (proves the hash is a pure function of static scripts + own content, not e.g. the repo name)
+    template: statefulset-repo.yaml
+    set:
+      repos:
+        - org: alpha
+          repo: one
+          customScript:
+            content: &sharedCustomScriptContent |
+              echo same-everywhere
+        - org: beta
+          repo: two
+          customScript:
+            content: *sharedCustomScriptContent
+    asserts:
+      - documentIndex: 1
+        isNotNull:
+          path: spec.template.metadata.annotations["checksum/scripts"]
+      - documentIndex: 3
+        isNotNull:
+          path: spec.template.metadata.annotations["checksum/scripts"]
+
   - it: fails when remoteControl.permissionMode is not a recognized value
     template: statefulset-repo.yaml
     set:

@@ -21,9 +21,9 @@ data:
     {{- .Files.Get "files/scripts/create-ssh-key.sh" | nindent 4 }}
   {{- $root := . }}
   {{- range $repoEntry := .Values.repos }}
-  {{- $content := include "cc-rc.customScriptContent" (dict "root" $root "repo" $repoEntry) }}
-  {{- if $content }}
-  custom-script-{{ include "cc-rc.repoSlug" $repoEntry }}.sh: |
-    {{- $content | nindent 4 }}
+  {{- $file := include "cc-rc.customScriptFile" (dict "root" $root "repo" $repoEntry) }}
+  {{- if $file }}
+  {{ $file }}: |
+    {{- include "cc-rc.customScriptContent" (dict "root" $root "repo" $repoEntry) | nindent 4 }}
   {{- end }}
   {{- end }}
