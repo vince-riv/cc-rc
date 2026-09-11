@@ -759,7 +759,7 @@ tests:
           path: spec.template.spec.terminationGracePeriodSeconds
           value: 120
 
-  - it: CUSTOM_SCRIPT_FILE is empty and no envFrom is set when customScript.content is unset
+  - it: CUSTOM_SCRIPT_FILE is empty and no envFrom is set when customScript.content/env/envFrom are all unset
     template: statefulset-repo.yaml
     set:
       repos:
@@ -776,18 +776,18 @@ tests:
         notExists:
           path: spec.template.spec.containers[0].envFrom
 
-  - it: sets CUSTOM_SCRIPT_FILE and wires env/envFrom onto the agent container when customScript.content is set
+  - it: sets CUSTOM_SCRIPT_FILE from customScript.content, independently of the top-level env/envFrom that land on the whole container
     template: statefulset-repo.yaml
     set:
       customScript:
         content: |
           echo hi
-        env:
-          - name: FOO
-            value: bar
-        envFrom:
-          - secretRef:
-              name: my-secret
+      env:
+        - name: FOO
+          value: bar
+      envFrom:
+        - secretRef:
+            name: my-secret
       repos:
         - org: myorg
           repo: myrepo
@@ -811,22 +811,21 @@ tests:
             - secretRef:
                 name: my-secret
 
-  - it: a repo's customScript.content/env/envFrom each independently fall back to the top-level default when unset
+  - it: a repo's env/envFrom fully replace the top-level default, independently of its own customScript.content
     template: statefulset-repo.yaml
     set:
       customScript:
         content: |
           echo shared
-        env:
-          - name: SHARED
-            value: "1"
+      env:
+        - name: SHARED
+          value: "1"
       repos:
         - org: myorg
           repo: myrepo
-          customScript:
-            env:
-              - name: ONLY_MYREPO
-                value: "1"
+          env:
+            - name: ONLY_MYREPO
+              value: "1"
     asserts:
       - documentIndex: 1
         contains:
@@ -834,7 +833,7 @@ tests:
           content:
             name: CUSTOM_SCRIPT_FILE
             # content still falls back to the top-level default since this
-            # repo's customScript only sets `env`.
+            # repo's customScript key isn't set at all.
             value: "custom-script-myorg-myrepo.sh"
       - documentIndex: 1
         contains:

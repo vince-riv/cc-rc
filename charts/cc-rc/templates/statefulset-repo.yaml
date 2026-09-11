@@ -23,10 +23,9 @@
 {{- $rcFirstBootTimeout := $rc.firstBootTimeoutSeconds | default $root.Values.remoteControl.firstBootTimeoutSeconds }}
 {{- $rcWorktreeMaxAgeDays := $rc.worktreeMaxAgeDays | default $root.Values.remoteControl.worktreeMaxAgeDays }}
 {{- $rcName := $rc.name | default "" }}
-{{- $cs := $repoEntry.customScript | default dict }}
-{{- $csEnv := $cs.env | default $root.Values.customScript.env }}
-{{- $csEnvFrom := $cs.envFrom | default $root.Values.customScript.envFrom }}
 {{- $csFile := include "cc-rc.customScriptFile" (dict "root" $root "repo" $repoEntry) }}
+{{- $envList := $repoEntry.env | default $root.Values.env }}
+{{- $envFromList := $repoEntry.envFrom | default $root.Values.envFrom }}
 {{- $nodeSelector := $repoEntry.nodeSelector | default $root.Values.nodeSelector }}
 {{- $affinity := $repoEntry.affinity | default $root.Values.affinity }}
 {{- $tolerations := $repoEntry.tolerations | default $root.Values.tolerations }}
@@ -233,10 +232,10 @@ spec:
               # is non-empty - agent-entrypoint.sh skips the step entirely
               # when this is "".
               value: {{ $csFile | quote }}
-            {{- with $csEnv }}
+            {{- with $envList }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
-          {{- with $csEnvFrom }}
+          {{- with $envFromList }}
           envFrom:
             {{- toYaml . | nindent 12 }}
           {{- end }}

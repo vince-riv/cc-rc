@@ -148,46 +148,10 @@ customScript:
     npm ci --prefix /workspace/repo
 ```
 
-`customScript.env`/`customScript.envFrom` add to the agent container's own `env`/
-`envFrom` — so they reach the custom script, the `claude` warm-up run, and `claude
-remote-control` alike (Kubernetes has no way to scope env to just one step inside a
-container). **Security note:** anything set here is therefore also readable by `claude
-remote-control` and by any code it runs, including a PR branch it checks out — don't use
-this for a secret meant only for the setup step:
-
-```yaml
-customScript:
-  content: |
-    npm ci --prefix /workspace/repo
-  env:
-    - name: NPM_TOKEN
-      valueFrom:
-        secretKeyRef:
-          name: my-secret
-          key: npm-token
-  envFrom:
-    - secretRef:
-        name: another-secret
-```
-
-Overridable per-repo via `repos[].customScript` — `content`/`env`/`envFrom` each fall
-back to the top-level default independently when the repo doesn't set that key at all
-(the same way `repos[].remoteControl.*` falls back to `remoteControl.*`), so a repo can
-add its own env vars while keeping the shared script, or run a completely different
-script while keeping the shared env:
-
-```yaml
-repos:
-  - org: myorg
-    repo: myrepo
-    customScript:
-      content: |
-        bundle install
-```
-
-Setting `repos[].customScript.content: ""` explicitly, though, opts that repo out of an
-inherited top-level script rather than falling back to it — the one case where an empty
-value means something different from "unset":
+Overridable per-repo via `repos[].customScript.content`, but unlike most other per-repo
+overrides in this chart, an explicit `content: ""` opts that repo out of an inherited
+top-level script rather than falling back to it — the one case where an empty value
+means something different from "unset":
 
 ```yaml
 customScript:
@@ -206,6 +170,52 @@ repos:
 Leaving `customScript.content` empty at the top level, with no per-repo override at all,
 skips the whole step for every repo: no extra `ConfigMap` key, no `CUSTOM_SCRIPT_FILE`
 env var set.
+
+`env`/`envFrom` (top level, not nested under `customScript`) add to the agent
+container's own `env`/`envFrom` directly — so they reach the custom script, the `claude`
+warm-up run, and `claude remote-control` alike (Kubernetes has no way to scope env to
+just one step inside a container, so these aren't a `customScript`-only knob even though
+setting up the custom script's own environment is the main reason to reach for them).
+**Security note:** anything set here is therefore also readable by `claude
+remote-control` and by any code it runs, including a PR branch it checks out — don't use
+this for a secret meant only for the setup step:
+
+```yaml
+customScript:
+  content: |
+    npm ci --prefix /workspace/repo
+env:
+  - name: NPM_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: my-secret
+        key: npm-token
+envFrom:
+  - secretRef:
+      name: another-secret
+```
+
+Overridable per-repo via `repos[].env`/`repos[].envFrom` — a full replace, not a merge,
+when set (the same semantics as `repos[].nodeSelector`/`repos[].tolerations`):
+
+```yaml
+env:
+  - name: SHARED
+    value: everyone-gets-this
+
+repos:
+  - org: myorg
+    repo: myrepo          # gets SHARED
+  - org: myorg
+    repo: gpu-repo
+    env:
+      - name: ONLY_HERE    # replaces the default entirely - no SHARED
+        value: "1"
+```
+
+Squid gets the equivalent `proxy.env`/`proxy.envFrom` on its own container, independent
+of the agent settings above — see "Scheduling" and "Custom labels and annotations"
+below for the same squid/agent-independence pattern applied to other settings.
 
 ## Configuring git identity
 

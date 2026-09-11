@@ -56,6 +56,13 @@ spec:
             # (what `kubectl logs`/stern show) when verbose.
             - name: PEBBLE_VERBOSE
               value: "1"
+            {{- with .Values.proxy.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.proxy.envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - name: squid
               containerPort: {{ .Values.proxy.service.port }}

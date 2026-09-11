@@ -145,46 +145,10 @@ customScript:
     npm ci --prefix /workspace/repo
 ```
 
-`customScript.env`/`customScript.envFrom` add to the agent container's own `env`/
-`envFrom` — so they reach the custom script, the `claude` warm-up run, and `claude
-remote-control` alike (Kubernetes has no way to scope env to just one step inside a
-container). **Security note:** anything set here is therefore also readable by `claude
-remote-control` and by any code it runs, including a PR branch it checks out — don't use
-this for a secret meant only for the setup step:
-
-```yaml
-customScript:
-  content: |
-    npm ci --prefix /workspace/repo
-  env:
-    - name: NPM_TOKEN
-      valueFrom:
-        secretKeyRef:
-          name: my-secret
-          key: npm-token
-  envFrom:
-    - secretRef:
-        name: another-secret
-```
-
-Overridable per-repo via `repos[].customScript` — `content`/`env`/`envFrom` each fall
-back to the top-level default independently when the repo doesn't set that key at all
-(the same way `repos[].remoteControl.*` falls back to `remoteControl.*`), so a repo can
-add its own env vars while keeping the shared script, or run a completely different
-script while keeping the shared env:
-
-```yaml
-repos:
-  - org: myorg
-    repo: myrepo
-    customScript:
-      content: |
-        bundle install
-```
-
-Setting `repos[].customScript.content: ""` explicitly, though, opts that repo out of an
-inherited top-level script rather than falling back to it — the one case where an empty
-value means something different from "unset":
+Overridable per-repo via `repos[].customScript.content`, but unlike most other per-repo
+overrides in this chart, an explicit `content: ""` opts that repo out of an inherited
+top-level script rather than falling back to it — the one case where an empty value
+means something different from "unset":
 
 ```yaml
 customScript:
@@ -203,6 +167,52 @@ repos:
 Leaving `customScript.content` empty at the top level, with no per-repo override at all,
 skips the whole step for every repo: no extra `ConfigMap` key, no `CUSTOM_SCRIPT_FILE`
 env var set.
+
+`env`/`envFrom` (top level, not nested under `customScript`) add to the agent
+container's own `env`/`envFrom` directly — so they reach the custom script, the `claude`
+warm-up run, and `claude remote-control` alike (Kubernetes has no way to scope env to
+just one step inside a container, so these aren't a `customScript`-only knob even though
+setting up the custom script's own environment is the main reason to reach for them).
+**Security note:** anything set here is therefore also readable by `claude
+remote-control` and by any code it runs, including a PR branch it checks out — don't use
+this for a secret meant only for the setup step:
+
+```yaml
+customScript:
+  content: |
+    npm ci --prefix /workspace/repo
+env:
+  - name: NPM_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: my-secret
+        key: npm-token
+envFrom:
+  - secretRef:
+      name: another-secret
+```
+
+Overridable per-repo via `repos[].env`/`repos[].envFrom` — a full replace, not a merge,
+when set (the same semantics as `repos[].nodeSelector`/`repos[].tolerations`):
+
+```yaml
+env:
+  - name: SHARED
+    value: everyone-gets-this
+
+repos:
+  - org: myorg
+    repo: myrepo          # gets SHARED
+  - org: myorg
+    repo: gpu-repo
+    env:
+      - name: ONLY_HERE    # replaces the default entirely - no SHARED
+        value: "1"
+```
+
+Squid gets the equivalent `proxy.env`/`proxy.envFrom` on its own container, independent
+of the agent settings above — see "Scheduling" and "Custom labels and annotations"
+below for the same squid/agent-independence pattern applied to other settings.
 
 ## Configuring git identity
 
@@ -495,10 +505,10 @@ Pebble entrypoint relay that to its own stdout (otherwise it's only visible via
 |-----|------|---------|-------------|
 | affinity | object | `{}` | Default affinity for every per-repo agent StatefulSet. Override per-repo via `repos[].affinity` (full replace, not merged with this default). |
 | annotations | object | `{}` | Extra annotations added to every per-repo agent StatefulSet object (not its pods). Merged on top of the chart's own annotations. Override/extend per-repo via `repos[].annotations`, which is merged per key over this default. Values are coerced to strings. `argocd.argoproj.io/sync-wave` stays chart-controlled and is rejected at render time - it exists to order a first ArgoCD sync after squid. |
-| customScript | object | `{"content":"","env":[],"envFrom":[]}` | Custom script run once per boot in the agent container, right before claude ever runs - covers both the auth warm-up `claude` call and `claude remote-control` itself - but only on a steady-state boot (skipped on the first-time interactive login boot). Runs with CWD at /workspace/repo (the already-cloned repo). A non-zero exit fails pod startup, same as a worktree-prune format mismatch, so build in your own error handling for anything non-fatal. Overridable per-repo via `repos[].customScript` - `content`/`env`/`envFrom` each fall back to this default independently when the repo doesn't set that key at all, the same way `repos[].remoteControl` works - but setting `repos[].customScript.content: ""` explicitly disables an inherited top-level script for that repo, rather than falling back. |
-| customScript.content | string | `""` | Inline shell script content. Empty (default) skips the custom-script step entirely - no extra ConfigMap key, no CUSTOM_SCRIPT_FILE set. |
-| customScript.env | list | `[]` | Extra env vars added to the agent container - so they reach the custom script, the `claude` warm-up run, and `claude remote-control` alike (Kubernetes has no way to scope env to just one step in a container). Same shape as a container's `env`; supports `valueFrom`. SECURITY: anything set here (e.g. a build-step token) is readable by claude remote-control and by any code it runs, including a PR branch it checks out - don't use this for a secret scoped to just the setup step. |
-| customScript.envFrom | list | `[]` | Extra envFrom added to the agent container, for the same reason as `env` above. Same shape as a container's `envFrom`. |
+| customScript | object | `{"content":""}` | Custom script run once per boot in the agent container, right before claude ever runs - covers both the auth warm-up `claude` call and `claude remote-control` itself - but only on a steady-state boot (skipped on the first-time interactive login boot). Runs with CWD at /workspace/repo (the already-cloned repo). A non-zero exit fails pod startup, same as a worktree-prune format mismatch, so build in your own error handling for anything non-fatal. |
+| customScript.content | string | `""` | Inline shell script content. Empty (default) skips the custom-script step entirely - no extra ConfigMap key, no CUSTOM_SCRIPT_FILE set. Overridable per-repo via `repos[].customScript.content` - unlike most other per-repo overrides in this chart, setting it to "" explicitly (rather than leaving the key out) opts that one repo out of an inherited top-level script, instead of falling back to it. |
+| env | list | `[]` | Extra env vars added to the agent container - so they reach the custom script above, the `claude` warm-up run, and `claude remote-control` alike (a container's env can't be scoped to just one step inside it). NOT nested under `customScript`: these apply to the whole container regardless of whether customScript.content is set at all. Overridable per-repo via `repos[].env` - a full replace, not a merge, when set (same as `nodeSelector`/`tolerations`). Same shape as a container's `env`; supports `valueFrom`. SECURITY: anything set here (e.g. a build-step token) is readable by claude remote-control and by any code it runs, including a PR branch it checks out - don't use this for a secret scoped to just one setup step. |
+| envFrom | list | `[]` | Extra envFrom added to the agent container, for the same reason and with the same per-repo override (`repos[].envFrom`, full replace) as `env` above. Same shape as a container's `envFrom`. |
 | git | object | `{"autoSetupRemote":true,"colorUi":"auto","defaultBranch":"main","editor":"","email":"","globalIgnore":["*~",".*.swp",".DS_Store","/target","*.egg-info","*.pyc","__pycache__","**/.claude/settings.local.json","**/.claude/worktrees/"],"logDecorate":"short","name":"","pushDefault":"simple"}` | Git identity and global config for the `dev` user inside each agent, rendered into ~/.gitconfig and ~/.gitignore_global via a ConfigMap. Commit signing is intentionally not configured here. |
 | git.autoSetupRemote | bool | `true` | push.autoSetupRemote |
 | git.colorUi | string | `"auto"` | color.ui |
@@ -522,13 +532,15 @@ Pebble entrypoint relay that to its own stdout (otherwise it's only visible via
 | podAnnotations | object | `{}` | Extra annotations added to every per-repo agent POD. Merged on top of the chart's own pod annotations. Override/extend per-repo via `repos[].podAnnotations`, which is merged per key over this default. Values are coerced to strings, so an unquoted `prometheus.io/scrape: true` is safe. `checksum/scripts` is chart-owned (it rolls the pods when a mounted script changes) and is rejected at render time. |
 | podFsGroup | int | `1001` | Group ID applied via pod securityContext.fsGroup so freshly-mounted PVCs are writable by the image's non-root `dev` user (created via `useradd -m`, uid/gid 1001). Changing this value re-chowns existing PVCs on their next pod mount (kubelet does this automatically; fsGroupChangePolicy is not set, so it defaults to "Always"). |
 | podLabels | object | `{}` | Extra labels added to every per-repo agent POD. Merged on top of the chart's own pod labels. Override/extend per-repo via `repos[].podLabels`, which is merged per key over this default. Values are coerced to strings. Setting a label here does not change the StatefulSet's (immutable) pod selector, which always uses the chart's own labels only; the chart-owned label keys are rejected at render time. |
-| proxy | object | `{"affinity":{},"allowList":[],"allowedPortsWhenOpen":[80,443,8080,8443,3000,5000,8000,9000],"annotations":{},"defaultBlocked":["cluster.local","192.168.0.0/16","10.0.0.0/8","172.16.0.0/12"],"denyList":[],"gracefulShutdownSeconds":45,"image":{"pullPolicy":"Always","repository":"ubuntu/squid","tag":"7.2-26.04_edge"},"labels":{},"nodeSelector":{},"podAnnotations":{},"podDisruptionBudget":{"enabled":false,"minAvailable":1},"podLabels":{},"probes":{"quiet":true},"replicaCount":1,"resources":{},"revisionHistoryLimit":5,"service":{"port":3128,"type":"ClusterIP"},"startupWaitTimeoutSeconds":120,"tolerations":[]}` | Squid egress proxy configuration. |
+| proxy | object | `{"affinity":{},"allowList":[],"allowedPortsWhenOpen":[80,443,8080,8443,3000,5000,8000,9000],"annotations":{},"defaultBlocked":["cluster.local","192.168.0.0/16","10.0.0.0/8","172.16.0.0/12"],"denyList":[],"env":[],"envFrom":[],"gracefulShutdownSeconds":45,"image":{"pullPolicy":"Always","repository":"ubuntu/squid","tag":"7.2-26.04_edge"},"labels":{},"nodeSelector":{},"podAnnotations":{},"podDisruptionBudget":{"enabled":false,"minAvailable":1},"podLabels":{},"probes":{"quiet":true},"replicaCount":1,"resources":{},"revisionHistoryLimit":5,"service":{"port":3128,"type":"ClusterIP"},"startupWaitTimeoutSeconds":120,"tolerations":[]}` | Squid egress proxy configuration. |
 | proxy.affinity | object | `{}` | affinity for the squid Deployment. When left empty AND replicaCount > 1, a preferred podAntiAffinity (topologyKey: kubernetes.io/hostname) is generated automatically, spreading squid replicas across nodes. Set this explicitly to take full control instead (it's used as-is, replacing that auto-generation). |
 | proxy.allowList | list | `[]` | Destinations agents are allowed to reach. Each entry is either a domain (e.g. "example.com", or ".example.com" to also match subdomains) or a CIDR (detected by the presence of "/", e.g. "140.82.112.0/20").  When EMPTY: all web traffic is permitted (subject to denyList/defaultBlocked below), on the ports listed in allowedPortsWhenOpen, plus github.com:22 for git+ssh. When NON-EMPTY: only these destinations are reachable (on ports 80/443), plus github.com:22 for git+ssh - that carve-out applies in BOTH modes (agents always clone/push over SSH, tunneled through squid; see sshKey above), unless github.com is itself in denyList. |
 | proxy.allowedPortsWhenOpen | list | `[80,443,8080,8443,3000,5000,8000,9000]` | Ports permitted for any destination when allowList is EMPTY (open-web mode). Ignored in strict allow-list mode (only 80/443 are opened there). |
 | proxy.annotations | object | `{}` | Extra annotations added to the squid Deployment object (not its pods). Values are coerced to strings. The chart puts no annotations of its own on this object, so no key is reserved here. |
 | proxy.defaultBlocked | list | `["cluster.local","192.168.0.0/16","10.0.0.0/8","172.16.0.0/12"]` | Baked-in destinations that are ALWAYS blocked on top of denyList. Not intended to be overridden — these protect cluster-internal networks. |
 | proxy.denyList | list | `[]` | Destinations that are always blocked, regardless of allow-list mode. Takes precedence over allowList and over the github.com:22 git+ssh carve-out. |
+| proxy.env | list | `[]` | Extra env vars added to the squid container, alongside the chart's own PEBBLE_VERBOSE. Same shape as a container's `env`; supports `valueFrom`. |
+| proxy.envFrom | list | `[]` | Extra envFrom added to the squid container. Same shape as a container's `envFrom`. |
 | proxy.gracefulShutdownSeconds | int | `45` | Seconds squid keeps serving already-open connections after a shutdown signal (squid.conf's shutdown_lifetime), before terminating. Protects in-flight agent traffic (git+ssh, HTTP(S) CONNECT) when a squid replica rolls or scales down. New connections are refused immediately. Set to "0" to disable graceful shutdown. |
 | proxy.labels | object | `{}` | Extra labels added to the squid Deployment object (not its pods, not its Service). Merged on top of the chart's own labels. Values are coerced to strings. The chart-owned label keys (`app.kubernetes.io/*`, `helm.sh/chart`) are rejected at render time rather than silently ignored. |
 | proxy.nodeSelector | object | `{}` | nodeSelector for the squid Deployment. |

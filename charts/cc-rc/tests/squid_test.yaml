@@ -265,6 +265,39 @@ tests:
             name: PEBBLE_VERBOSE
             value: "1"
 
+  - it: no envFrom by default, and proxy.env adds to PEBBLE_VERBOSE rather than replacing it
+    template: deployment-squid.yaml
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].envFrom
+
+  - it: wires proxy.env/proxy.envFrom onto the squid container
+    template: deployment-squid.yaml
+    set:
+      proxy:
+        env:
+          - name: FOO
+            value: bar
+        envFrom:
+          - secretRef:
+              name: my-secret
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PEBBLE_VERBOSE
+            value: "1"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: FOO
+            value: bar
+      - equal:
+          path: spec.template.spec.containers[0].envFrom
+          value:
+            - secretRef:
+                name: my-secret
+
   - it: renders a squid ClusterIP Service on the proxy port
     template: service-squid.yaml
     asserts:
