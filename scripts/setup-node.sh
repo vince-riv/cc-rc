@@ -14,7 +14,7 @@ NODE22_VERSION=v22.23.2
 # renovate: datasource=node-version depName=node-24
 NODE24_VERSION=v24.20.0
 # renovate: datasource=node-version depName=node-26
-NODE26_VERSION=v26.8.1
+NODE26_VERSION=26.8.2
 
 case "$(dpkg --print-architecture)" in
     amd64) node_arch=x64 ;;
