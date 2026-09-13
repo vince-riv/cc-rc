@@ -1,5 +1,10 @@
 set -euo pipefail
-: "${SQUID_HOST:?}" "${SQUID_PORT:?}"
+# SQUID_HOST empty/unset means "no proxy in front of us" - the chart always
+# sets it, scripts/run-local.sh (docker/podman, no squid) never does.
+SQUID_HOST="${SQUID_HOST:-}"
+if [ -n "$SQUID_HOST" ]; then
+  : "${SQUID_PORT:?SQUID_PORT is required when SQUID_HOST is set}"
+fi
 SSH_DIR="/mnt/home-pvc/.ssh"
 
 mkdir -p "$SSH_DIR"
@@ -12,18 +17,24 @@ install -m 600 /mnt/ssh-key/id_ed25519 "$SSH_DIR/id_ed25519"
 install -m 644 /mnt/ssh-key/id_ed25519.pub "$SSH_DIR/id_ed25519.pub"
 
 # Always rewritten (unlike known_hosts below): squid's host/port are
-# chart-derived, not user data, so a stale copy should never win. Tunnels
-# git+ssh through squid via connect-proxy's `connect` (CONNECT method) -
-# squid's own squid.conf allows CONNECT to github.com:22 unconditionally,
-# see configmap-squid.yaml.
+# chart-derived, not user data, so a stale copy should never win.
 cat > "$SSH_DIR/config" <<EOF
 Host github.com
     User git
     IdentityFile ~/.ssh/id_ed25519
     IdentitiesOnly yes
     StrictHostKeyChecking yes
+EOF
+
+# With a proxy in front of us, tunnel git+ssh through squid via
+# connect-proxy's `connect` (CONNECT method) - squid's own squid.conf allows
+# CONNECT to github.com:22 unconditionally, see configmap-squid.yaml. Without
+# one, ssh reaches github.com:22 directly and no ProxyCommand is written.
+if [ -n "$SQUID_HOST" ]; then
+  cat >> "$SSH_DIR/config" <<EOF
     ProxyCommand connect -H ${SQUID_HOST}:${SQUID_PORT} %h %p
 EOF
+fi
 chmod 644 "$SSH_DIR/config"
 
 KNOWN_HOSTS="$SSH_DIR/known_hosts"

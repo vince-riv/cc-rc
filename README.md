@@ -74,6 +74,30 @@ at least one `repos[]` entry (`org`/`repo`). Full reference in
     `remoteControl.*`/`repos[].remoteControl.*`) directly; readiness probe checks the
     process is running, container self-exits after 45s down.
 
+## Running one agent locally
+
+`scripts/run-local.sh` runs a single agent under docker or podman, in the same shape as
+one of those StatefulSets — same image, the same orchestration scripts (bind-mounted from
+`charts/cc-rc/files/scripts` where the chart ConfigMap-mounts them), the same
+`/home/dev` + `/workspace` split, and the same first-boot `/login` flow.
+
+```sh
+export GITHUB_TOKEN=ghp_...
+scripts/run-local.sh --repo myorg/myrepo --ssh-key ~/.ssh/id_ed25519 \
+  --token-env GITHUB_TOKEN --code-dir ~/src/cc-rc-agent
+```
+
+`--token-env` names the env var holding the PAT (never the PAT itself, so it stays out of
+argv and shell history), `--ssh-key` is a key already registered with GitHub, and
+`--code-dir` is the host directory the repo is cloned into (`<code-dir>/repo`). `/home/dev`
+lives in a named volume, so claude's login survives `--recreate`; `--stop` removes the
+container, `--purge` removes the volume too. `--help` lists the rest (`--engine`,
+`--image`, `--permission-mode`, `--spawn`, `--capacity`, `--attach`, ...).
+
+Differences from the pod, all deliberate: no squid (local egress is unrestricted, no
+`HTTP(S)_PROXY`, git+ssh goes straight to github.com), your own SSH key instead of the
+chart's generated deploy key, and a host directory instead of the workspace PVC.
+
 ## Development
 
 ```sh
