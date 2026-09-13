@@ -46,6 +46,7 @@ ATTACH=0
 FOLLOW=0
 PULL=0
 CHOWN="auto"
+MATCH_HOST_UID=0
 
 # Defaults mirror charts/cc-rc/values.yaml's remoteControl block.
 RC_NAME=""
@@ -89,6 +90,9 @@ Options:
       --recreate           Remove an existing container first, then run
       --attach             Attach to the agent's screen session when up
       --follow             Follow container logs after starting
+      --match-host-uid     Build (once per base image) a derived image whose
+                           dev user has your uid:gid, so --code-dir needs no
+                           chown and the clone stays owned by you
       --chown / --no-chown Force or skip chowning --code-dir to the image's
                            uid:gid (default: ask when it does not match)
       --stop               Stop and remove the container, then exit
@@ -100,6 +104,15 @@ USAGE
 }
 
 die() { echo "$0: $*" >&2; exit 1; }
+
+# Temp dirs this script creates, removed on any exit - including a die().
+KEY_STAGE=""
+BUILD_CTX=""
+cleanup() {
+  [ -z "$KEY_STAGE" ] || rm -rf "$KEY_STAGE"
+  [ -z "$BUILD_CTX" ] || rm -rf "$BUILD_CTX"
+}
+trap cleanup EXIT
 
 # Every long option takes its value as the next argument; fail loudly rather
 # than silently consuming the following flag as a value.
@@ -130,6 +143,7 @@ while [ $# -gt 0 ]; do
     --recreate) RECREATE=1; shift ;;
     --attach) ATTACH=1; shift ;;
     --follow) FOLLOW=1; shift ;;
+    --match-host-uid) MATCH_HOST_UID=1; shift ;;
     --chown) CHOWN="yes"; shift ;;
     --no-chown) CHOWN="no"; shift ;;
     --stop) ACTION="stop"; shift ;;
@@ -259,8 +273,16 @@ fi
 # The image's `dev` user, asked for rather than assumed: its uid depends on
 # what the base image already allocated (Ubuntu ships an `ubuntu` user at
 # 1000), so it is not a constant this script can hardcode.
-read -r DEV_UID DEV_GID < <("$ENGINE" run --rm "$IMAGE" sh -c 'id -u; id -g' | tr '\n' ' ')
-[ -n "${DEV_UID:-}" ] && [ -n "${DEV_GID:-}" ] || die "could not read the image's uid/gid"
+# Captured first, then split via a here-string: `read` returns non-zero when
+# its input has no trailing newline, which under `set -e` would end the script
+# with no message at all.
+echo "Checking which uid:gid $IMAGE runs as..."
+DEV_IDS="$("$ENGINE" run --rm "$IMAGE" sh -c 'echo "$(id -u) $(id -g)"')" \
+  || die "could not start a container from $IMAGE - check that '$ENGINE run' works at all"
+read -r DEV_UID DEV_GID <<<"$DEV_IDS"
+case "${DEV_UID:-}:${DEV_GID:-}" in
+  *[!0-9:]*|:*|*:) die "could not read the image's uid/gid (got: '$DEV_IDS')" ;;
+esac
 
 # SELinux-enforcing hosts (podman's usual home) deny a container access to an
 # unlabeled bind mount; :z relabels it as shared container content. Suffixes
@@ -288,6 +310,64 @@ if [ "$(basename "$ENGINE")" = "podman" ] && [ "$("$ENGINE" info --format '{{.Ho
   fi
 fi
 
+# --match-host-uid: Docker has no per-container uid mapping (no keep-id, no
+# idmapped bind mounts), so the mapping gets baked into a derived image
+# instead. `dev` is renumbered to your uid:gid, which makes chowning
+# --code-dir unnecessary and leaves every file in the clone owned by you on
+# the host. The tag embeds the base image's ID and a hash of the recipe, so a
+# newly pulled base or an edited recipe gets its own derived image rather than
+# silently reusing a stale one.
+if [ "$MATCH_HOST_UID" -eq 1 ]; then
+  HOST_UID="$(id -u)"
+  HOST_GID="$(id -g)"
+  [ "$HOST_UID" -ne 0 ] || die "--match-host-uid would give dev uid 0 - run this as your normal user"
+  if [ "$KEEP_ID" -eq 1 ]; then
+    echo "--match-host-uid: not needed - podman keep-id already maps your uid to dev."
+  elif [ "$HOST_UID:$HOST_GID" = "$DEV_UID:$DEV_GID" ]; then
+    echo "--match-host-uid: $IMAGE already runs as $HOST_UID:$HOST_GID - using it as is."
+  else
+    base_id="$("$ENGINE" image inspect -f '{{.Id}}' "$IMAGE")"
+    base_id="${base_id#sha256:}"
+    # Frees the target ids first (Ubuntu images ship an `ubuntu` user at
+    # 1000), then renumbers dev and re-owns what it owns in its home and in
+    # /workspace. Not the whole filesystem: tarballs extracted as root keep
+    # their packager's uid - nodejs.org's is 1001, the same as dev's - and
+    # re-owning those only copies hundreds of MB into the new layer. A dozen
+    # of ~/.nvm's symlinks can keep the old gid - in testing (Docker Desktop,
+    # overlayfs) lchown left their gid unchanged, even at runtime as root.
+    # Harmless: symlink ownership grants nothing, and the home volume hides
+    # the image's /home/dev at runtime anyway.
+    BUILD_CTX="$(mktemp -d)"
+    cat > "$BUILD_CTX/Dockerfile" <<DOCKERFILE
+FROM $IMAGE
+USER root
+RUN set -eu; \\
+    u="\$(getent passwd $HOST_UID | cut -d: -f1)"; \\
+    if [ -n "\$u" ] && [ "\$u" != dev ]; then userdel -r "\$u" 2>/dev/null || true; fi; \\
+    if getent passwd $HOST_UID >/dev/null; then echo "uid $HOST_UID is still taken" >&2; exit 1; fi; \\
+    g="\$(getent group $HOST_GID | cut -d: -f1)"; \\
+    if [ -n "\$g" ] && [ "\$g" != dev ]; then groupdel "\$g"; fi; \\
+    groupmod -g $HOST_GID dev; \\
+    usermod -u $HOST_UID -g $HOST_GID dev; \\
+    find /home/dev /workspace -xdev \( -uid $DEV_UID -o -gid $DEV_GID \) -exec chown -h $HOST_UID:$HOST_GID {} +
+USER dev
+LABEL io.cc-rc.local.base-image="$IMAGE" io.cc-rc.local.base-id="sha256:$base_id"
+DOCKERFILE
+    recipe_hash="$({ sha256sum "$BUILD_CTX/Dockerfile" 2>/dev/null || shasum -a 256 "$BUILD_CTX/Dockerfile"; } | cut -c1-8)"
+    DERIVED_IMAGE="localhost/cc-rc-local:${base_id:0:12}-u${HOST_UID}-g${HOST_GID}-${recipe_hash}"
+    if "$ENGINE" image inspect "$DERIVED_IMAGE" >/dev/null 2>&1; then
+      echo "--match-host-uid: reusing $DERIVED_IMAGE."
+    else
+      echo "==> match-host-uid (building $DERIVED_IMAGE: dev $DEV_UID:$DEV_GID -> $HOST_UID:$HOST_GID)"
+      "$ENGINE" build -t "$DERIVED_IMAGE" "$BUILD_CTX" \
+        || die "building $DERIVED_IMAGE failed"
+    fi
+    IMAGE="$DERIVED_IMAGE"
+    DEV_UID="$HOST_UID"
+    DEV_GID="$HOST_GID"
+  fi
+fi
+
 host_uid_of() {
   stat -c %u "$1" 2>/dev/null || stat -f %u "$1" 2>/dev/null || echo -1
 }
@@ -306,7 +386,9 @@ if [ "$CHOWN" != "no" ] && needs_chown; then
     do_chown=1
   elif [ -t 0 ]; then
     echo "$CODE_DIR is owned by uid $(host_uid_of "$CODE_DIR"), but the agent runs as uid $DEV_UID."
-    read -r -p "Chown it (recursively) to $DEV_UID:$DEV_GID so the agent can clone into it? [y/N] " reply
+    # `|| reply=""`: Ctrl-D makes read return non-zero, which under `set -e`
+    # would exit silently instead of taking the [N] default.
+    read -r -p "Chown it (recursively) to $DEV_UID:$DEV_GID so the agent can clone into it? [y/N] " reply || reply=""
     case "$reply" in [yY]*) do_chown=1 ;; esac
   else
     die "$CODE_DIR is not owned by uid $DEV_UID and this is not a terminal - re-run with --chown (or --no-chown to try anyway)"
@@ -362,20 +444,21 @@ chmod 644 "$STATE_DIR/gitconfig" "$STATE_DIR/gitignore_global"
 
 # seed-ssh.sh expects both halves of the key under /mnt/ssh-key, so the key is
 # staged (never mounted from its real path) - the public half is derived when
-# you only have the private one. Mode 0644 on the copies, because the image's
-# `dev` uid usually differs from yours and would otherwise be unable to read
-# them; the staging dir itself stays 0700, so nothing on the host gains access.
+# you only have the private one. The image's `dev` uid usually differs from
+# yours, so the mounted dir is 0755 and the copies 0644. Only that inner dir is
+# mounted - its own mode is what the container sees - while the outer mktemp
+# dir stays 0700, so no other user on the host can reach the copies.
 KEY_STAGE="$(mktemp -d)"
 chmod 700 "$KEY_STAGE"
-cleanup() { rm -rf "$KEY_STAGE"; }
-trap cleanup EXIT
-install -m 644 "$SSH_KEY" "$KEY_STAGE/id_ed25519"
+KEY_MOUNT="$KEY_STAGE/ssh-key"
+mkdir -m 755 "$KEY_MOUNT"
+install -m 644 "$SSH_KEY" "$KEY_MOUNT/id_ed25519"
 if [ -f "$SSH_KEY.pub" ]; then
-  install -m 644 "$SSH_KEY.pub" "$KEY_STAGE/id_ed25519.pub"
+  install -m 644 "$SSH_KEY.pub" "$KEY_MOUNT/id_ed25519.pub"
 else
-  ssh-keygen -y -f "$SSH_KEY" > "$KEY_STAGE/id_ed25519.pub" \
+  ssh-keygen -y -f "$SSH_KEY" > "$KEY_MOUNT/id_ed25519.pub" \
     || die "no $SSH_KEY.pub and 'ssh-keygen -y' could not derive it (passphrase-protected key?)"
-  chmod 644 "$KEY_STAGE/id_ed25519.pub"
+  chmod 644 "$KEY_MOUNT/id_ed25519.pub"
 fi
 
 # --- init phases, in the StatefulSet's order --------------------------------
@@ -388,6 +471,16 @@ phase() {
   "$ENGINE" run --rm ${USERNS[@]+"${USERNS[@]}"} "$@"
 }
 
+# A new volume mounted where the image has no directory (/mnt/home-pvc) comes
+# up root-owned, so seed-home - running as dev - could not write to it; the pod
+# gets the same fix from fsGroup. Also re-owns a volume last used at another
+# uid (e.g. before --match-host-uid), whose 0600 claude credentials would
+# otherwise be unreadable. Recursive only when the top-level owner is wrong.
+phase "prep-home (home volume owned by $DEV_UID:$DEV_GID)" \
+  --user 0:0 \
+  -v "$VOLUME:/mnt/home-pvc" \
+  "$IMAGE" sh -c "[ \"\$(stat -c %u:%g /mnt/home-pvc)\" = $DEV_UID:$DEV_GID ] || chown -R $DEV_UID:$DEV_GID /mnt/home-pvc"
+
 # wait-for-squid is skipped on purpose: there is no proxy to wait for here.
 phase "seed-home (sync ~/.claude from the image onto the home volume)" \
   -v "$VOLUME:/mnt/home-pvc" \
@@ -399,7 +492,7 @@ phase "seed-home (sync ~/.claude from the image onto the home volume)" \
 phase "seed-ssh (install the key, ssh config and known_hosts)" \
   -e SQUID_HOST= -e SQUID_PORT= \
   -v "$VOLUME:/mnt/home-pvc" \
-  -v "$KEY_STAGE:/mnt/ssh-key$MOUNT_RO" \
+  -v "$KEY_MOUNT:/mnt/ssh-key$MOUNT_RO" \
   -v "$SCRIPTS_DIR:/opt/cc-rc/scripts$MOUNT_RO" \
   "$IMAGE" bash /opt/cc-rc/scripts/seed-ssh.sh
 

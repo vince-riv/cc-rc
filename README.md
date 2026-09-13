@@ -94,6 +94,12 @@ lives in a named volume, so claude's login survives `--recreate`; `--stop` remov
 container, `--purge` removes the volume too. `--help` lists the rest (`--engine`,
 `--image`, `--permission-mode`, `--spawn`, `--capacity`, `--attach`, ...).
 
+Docker has no per-container uid mapping, so the image's `dev` user (uid 1001) usually
+differs from yours, and the script offers to chown `--code-dir` to it.
+`--match-host-uid` avoids that: it builds a derived image (once per base image) with
+`dev` renumbered to your uid:gid, so the clone stays owned by you on the host.
+Rootless podman needs neither; the script maps your uid with `--userns=keep-id`.
+
 Differences from the pod, all deliberate: no squid (local egress is unrestricted, no
 `HTTP(S)_PROXY`, git+ssh goes straight to github.com), your own SSH key instead of the
 chart's generated deploy key, and a host directory instead of the workspace PVC.
