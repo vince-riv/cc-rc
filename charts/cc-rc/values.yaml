@@ -119,6 +119,15 @@ repos: []
   #     unhealthyTimeoutSeconds: 45
   #     firstBootTimeoutSeconds: 900
   #     worktreeMaxAgeDays: 10
+  #   customScript:
+  #     content: |
+  #       npm ci --prefix /workspace/repo
+  #   env:
+  #     - name: FOO
+  #       value: bar
+  #   envFrom:
+  #     - secretRef:
+  #         name: my-secret
   #   nodeSelector:
   #     disktype: ssd
   #   affinity: {}
@@ -221,6 +230,55 @@ remoteControl:
   # before remote-control starts.
   worktreeMaxAgeDays: 10
 
+# -- Custom script run once per boot in the agent container, right before
+# claude ever runs - covers both the auth warm-up `claude` call and `claude
+# remote-control` itself - but only on a steady-state boot (skipped on the
+# first-time interactive login boot). Runs with CWD at /workspace/repo (the
+# already-cloned repo). A non-zero exit fails pod startup, same as a
+# worktree-prune format mismatch, so build in your own error handling for
+# anything non-fatal.
+customScript:
+  # -- Inline shell script content. Empty (default) skips the custom-script
+  # step entirely - no extra ConfigMap key, no CUSTOM_SCRIPT_FILE set.
+  # Overridable per-repo via `repos[].customScript.content` - unlike most
+  # other per-repo overrides in this chart, setting it to "" explicitly
+  # (rather than leaving the key out) opts that one repo out of an inherited
+  # top-level script, instead of falling back to it.
+  content: ""
+  # content: |
+  #   npm ci --prefix /workspace/repo
+
+# -- Extra env vars added to the agent container - so they reach the custom
+# script above, the `claude` warm-up run, and `claude remote-control` alike
+# (a container's env can't be scoped to just one step inside it). NOT nested
+# under `customScript`: these apply to the whole container regardless of
+# whether customScript.content is set at all. Overridable per-repo via
+# `repos[].env` - a full replace, not a merge, when set (same as
+# `nodeSelector`/`tolerations`). Same shape as a container's `env`; supports
+# `valueFrom`.
+# SECURITY: anything set here (e.g. a build-step token) is readable by claude
+# remote-control and by any code it runs, including a PR branch it checks
+# out - don't use this for a secret scoped to just one setup step.
+env: []
+# env:
+#   - name: FOO
+#     value: bar
+#   - name: NPM_TOKEN
+#     valueFrom:
+#       secretKeyRef:
+#         name: my-secret
+#         key: npm-token
+
+# -- Extra envFrom added to the agent container, for the same reason and with
+# the same per-repo override (`repos[].envFrom`, full replace) as `env`
+# above. Same shape as a container's `envFrom`.
+envFrom: []
+# envFrom:
+#   - secretRef:
+#       name: my-secret
+#   - configMapRef:
+#       name: my-configmap
+
 # -- Seconds kubelet waits after sending SIGTERM before sending SIGKILL to the
 # agent container. Raised above Kubernetes' 30s default so claude has real
 # time to exit cleanly (agent-entrypoint.sh forwards SIGINT to it on SIGTERM)
@@ -270,6 +328,20 @@ proxy:
     port: 3128
     type: ClusterIP
   resources: {}
+
+  # -- Extra env vars added to the squid container, alongside the chart's own
+  # PEBBLE_VERBOSE. Same shape as a container's `env`; supports `valueFrom`.
+  env: []
+  # env:
+  #   - name: FOO
+  #     value: bar
+
+  # -- Extra envFrom added to the squid container. Same shape as a
+  # container's `envFrom`.
+  envFrom: []
+  # envFrom:
+  #   - secretRef:
+  #       name: my-secret
 
   # -- Extra labels added to the squid Deployment object (not its pods, not its
   # Service). Merged on top of the chart's own labels. Values are coerced to strings.

@@ -57,8 +57,9 @@ repo, each behind a locked-down [Squid](https://www.squid-cache.org/) egress pro
   `image.repository`/`image.tag` only needs to provide the underlying tools (`claude`,
   `screen`, `git`, `rsync`, `ssh-keygen`, `connect` (from `connect-proxy`), `gh`,
   `kubectl`), not this orchestration
-  logic. A `checksum/scripts` pod annotation rolls the `StatefulSet`s on any script
-  change.
+  logic — plus one `custom-script-<org-repo-slug>.sh` key per `repos[]` entry that sets
+  `customScript.content` (see "Running a custom script before claude" below). A
+  `checksum/scripts` pod annotation rolls the `StatefulSet`s on any script change.
 
 ## Installing
 
@@ -131,6 +132,90 @@ repos:
       requests:
         cpu: "2"          # memory still comes from the default above
 ```
+
+## Running a custom script before claude
+
+`customScript.content` is an inline shell script run once per boot in the agent
+container, right before claude ever runs — covers both the auth warm-up `claude` call
+and `claude remote-control` itself — but only on a steady-state boot (skipped on the
+first-time interactive login boot). It runs with CWD at `/workspace/repo` (the
+already-cloned repo). A non-zero exit fails pod startup, the same as a worktree-prune
+format mismatch, so build in your own error handling for anything non-fatal:
+
+```yaml
+customScript:
+  content: |
+    npm ci --prefix /workspace/repo
+```
+
+Overridable per-repo via `repos[].customScript.content`, but unlike most other per-repo
+overrides in this chart, an explicit `content: ""` opts that repo out of an inherited
+top-level script rather than falling back to it — the one case where an empty value
+means something different from "unset":
+
+```yaml
+customScript:
+  content: |
+    npm ci --prefix /workspace/repo
+
+repos:
+  - org: myorg
+    repo: myrepo          # runs the shared npm ci script
+  - org: myorg
+    repo: no-setup-needed
+    customScript:
+      content: ""          # opts out - no custom script runs for this repo
+```
+
+Leaving `customScript.content` empty at the top level, with no per-repo override at all,
+skips the whole step for every repo: no extra `ConfigMap` key, no `CUSTOM_SCRIPT_FILE`
+env var set.
+
+`env`/`envFrom` (top level, not nested under `customScript`) add to the agent
+container's own `env`/`envFrom` directly — so they reach the custom script, the `claude`
+warm-up run, and `claude remote-control` alike (Kubernetes has no way to scope env to
+just one step inside a container, so these aren't a `customScript`-only knob even though
+setting up the custom script's own environment is the main reason to reach for them).
+**Security note:** anything set here is therefore also readable by `claude
+remote-control` and by any code it runs, including a PR branch it checks out — don't use
+this for a secret meant only for the setup step:
+
+```yaml
+customScript:
+  content: |
+    npm ci --prefix /workspace/repo
+env:
+  - name: NPM_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: my-secret
+        key: npm-token
+envFrom:
+  - secretRef:
+      name: another-secret
+```
+
+Overridable per-repo via `repos[].env`/`repos[].envFrom` — a full replace, not a merge,
+when set (the same semantics as `repos[].nodeSelector`/`repos[].tolerations`):
+
+```yaml
+env:
+  - name: SHARED
+    value: everyone-gets-this
+
+repos:
+  - org: myorg
+    repo: myrepo          # gets SHARED
+  - org: myorg
+    repo: gpu-repo
+    env:
+      - name: ONLY_HERE    # replaces the default entirely - no SHARED
+        value: "1"
+```
+
+Squid gets the equivalent `proxy.env`/`proxy.envFrom` on its own container, independent
+of the agent settings above — see "Scheduling" and "Custom labels and annotations"
+below for the same squid/agent-independence pattern applied to other settings.
 
 ## Configuring git identity
 

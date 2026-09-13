@@ -87,6 +87,68 @@ deploy key with - sshKey.tokenOrg if set, else repos[0].org.
 {{- end -}}
 
 {{/*
+Effective custom-script content for one repo: repos[].customScript.content
+when the repo sets that key at all (even to "" - the documented way to
+disable an inherited top-level script), else the top-level
+customScript.content default. Pass `root` and `repo`. hasKey, not `default`,
+is required here: `default` treats "" as absent and would fall through to
+the top-level script, silently ignoring an explicit opt-out.
+*/}}
+{{- define "cc-rc.customScriptContent" -}}
+{{- $cs := .repo.customScript | default dict -}}
+{{- if hasKey $cs "content" -}}
+{{- $cs.content -}}
+{{- else -}}
+{{- .root.Values.customScript.content -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+ConfigMap key holding one repo's rendered custom script, or "" if it has none
+(effective content is empty - the default, or an explicit per-repo opt-out).
+Pass `root` and `repo`.
+*/}}
+{{- define "cc-rc.customScriptFile" -}}
+{{- if include "cc-rc.customScriptContent" . -}}
+{{- printf "custom-script-%s.sh" (include "cc-rc.repoSlug" .repo) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Content hashed into the checksum/scripts pod annotation for one repo's agent
+StatefulSet - the chart's static orchestration scripts (shared by every
+repo) plus this repo's own effective custom-script content only. Deliberately
+NOT a hash of the whole scripts ConfigMap: that object holds every repo's
+custom-script content in one place, and hashing all of it would roll every
+repo's pods whenever any single repo's customScript changed. Pass `root` and
+`repo`.
+
+The static set is a glob (files/scripts/*.sh), not a hand-maintained list of
+filenames - a hard-coded list can silently drift from configmap-scripts.yaml
+(a script added there but not here never rolls pods when it later changes),
+and a glob can't drift that way. rescue-sessions.sh is excluded: it matches
+the glob but isn't part of this ConfigMap at all (baked into the image
+directly - see the README's "Worktree pruning and orphaned-session recovery"
+section), so including it would roll pods on a change that can't actually
+reach them.
+
+toJson (not a manual join) sidesteps ever needing a delimiter between
+pieces - a delimiter is one more thing a future edit could get wrong (a raw
+NUL byte, in an earlier version of this helper, made the whole file look
+binary to git), where toJson's own quoting/escaping can't collide with a
+script's content no matter what that content contains.
+*/}}
+{{- define "cc-rc.agentScriptsChecksum" -}}
+{{- $static := dict -}}
+{{- range $path, $bytes := (.root.Files.Glob "files/scripts/*.sh") -}}
+{{- if ne (base $path) "rescue-sessions.sh" -}}
+{{- $_ := set $static (base $path) (toString $bytes) -}}
+{{- end -}}
+{{- end -}}
+{{- list $static (include "cc-rc.customScriptContent" .) | toJson | sha256sum -}}
+{{- end -}}
+
+{{/*
 Fully qualified squid Service name.
 */}}
 {{- define "cc-rc.squidServiceName" -}}

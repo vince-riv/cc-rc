@@ -23,6 +23,9 @@
 {{- $rcFirstBootTimeout := $rc.firstBootTimeoutSeconds | default $root.Values.remoteControl.firstBootTimeoutSeconds }}
 {{- $rcWorktreeMaxAgeDays := $rc.worktreeMaxAgeDays | default $root.Values.remoteControl.worktreeMaxAgeDays }}
 {{- $rcName := $rc.name | default "" }}
+{{- $csFile := include "cc-rc.customScriptFile" (dict "root" $root "repo" $repoEntry) }}
+{{- $envList := $repoEntry.env | default $root.Values.env }}
+{{- $envFromList := $repoEntry.envFrom | default $root.Values.envFrom }}
 {{- $nodeSelector := $repoEntry.nodeSelector | default $root.Values.nodeSelector }}
 {{- $affinity := $repoEntry.affinity | default $root.Values.affinity }}
 {{- $tolerations := $repoEntry.tolerations | default $root.Values.tolerations }}
@@ -70,7 +73,11 @@ spec:
   template:
     metadata:
       annotations:
-        {{- $scriptsChecksum := include (print $.Template.BasePath "/configmap-scripts.yaml") $root | sha256sum }}
+        {{- /* Hashes only the static scripts plus THIS repo's own
+           customScript content - not the whole scripts ConfigMap, which
+           holds every repo's custom script and would otherwise roll every
+           repo's pods whenever any one repo's customScript changed. */ -}}
+        {{- $scriptsChecksum := include "cc-rc.agentScriptsChecksum" (dict "root" $root "repo" $repoEntry) }}
         {{- include "cc-rc.mergedMeta" (dict "base" (dict "checksum/scripts" $scriptsChecksum) "extra" $extraPodAnnotations) | nindent 8 }}
       labels:
         {{- include "cc-rc.mergedMeta" (dict "base" $chartLabels "extra" $extraPodLabels) | nindent 8 }}
@@ -220,6 +227,18 @@ spec:
             # session, so instructions show up wherever someone looks.
             - name: PROMPT_COMMAND
               value: "source /opt/cc-rc/scripts/bash-prompt-hook.sh"
+            - name: CUSTOM_SCRIPT_FILE
+              # Set only when customScript.content (or this repo's override)
+              # is non-empty - agent-entrypoint.sh skips the step entirely
+              # when this is "".
+              value: {{ $csFile | quote }}
+            {{- with $envList }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with $envFromList }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           # No livenessProbe: it would kill the container on kubelet's own
           # schedule, bypassing RC_UNHEALTHY_TIMEOUT - the script manages its
           # own exit-on-unhealthy so that timeout (and the debugging window

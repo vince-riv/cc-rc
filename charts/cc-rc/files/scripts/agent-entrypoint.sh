@@ -122,6 +122,31 @@ prune_stale_worktrees() {
   git worktree prune 2>&1 || true
 }
 
+# Runs the per-repo custom script (CUSTOM_SCRIPT_FILE, set from the chart's
+# customScript value) once per boot, right before claude ever runs - covers
+# both the auth warm-up call below and claude remote-control itself. A no-op
+# when CUSTOM_SCRIPT_FILE is unset/empty (the default: no customScript.content
+# configured for this repo). Runs with CWD at /workspace/repo; a non-zero
+# exit fails pod startup, same as a worktree-prune format mismatch, so build
+# in your own error handling for anything non-fatal.
+# bash -l (not a bare bash): same trap the warm-up run below documents -
+# ~/.local/bin only reaches PATH via /etc/profile.d, which needs a login
+# shell. Without -l, a script calling claude/rescue-sessions.sh/nvm fails
+# with "command not found" and crash-loops the pod via the exit 1 below.
+run_custom_script() {
+  [ -n "${CUSTOM_SCRIPT_FILE:-}" ] || return 0
+  script="/opt/cc-rc/scripts/${CUSTOM_SCRIPT_FILE}"
+  if [ ! -f "$script" ]; then
+    echo "FATAL: CUSTOM_SCRIPT_FILE=$CUSTOM_SCRIPT_FILE set but $script is missing." >&2
+    exit 1
+  fi
+  echo "Running custom script ($script) before starting claude..."
+  if ! (cd /workspace/repo && bash -l "$script"); then
+    echo "FATAL: custom script ($script) exited non-zero - aborting startup." >&2
+    exit 1
+  fi
+}
+
 if [ ! -f "$MARKER" ]; then
   echo "No login marker at $MARKER - starting first-time claude login setup."
   echo "Attach with: kubectl exec -it \$(hostname) -- screen -r claude-login"
@@ -159,6 +184,8 @@ echo "Session output tailed below (and kept at $RC_LOG). To debug interactively:
 echo "  kubectl exec -it \$(hostname) -- screen -r remote-control"
 
 prune_stale_worktrees
+
+run_custom_script
 
 # remote-control doesn't refresh stale authentication on startup, but an
 # ordinary `claude` run does - so after a roll it comes up unauthenticated

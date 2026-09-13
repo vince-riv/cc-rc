@@ -759,6 +759,122 @@ tests:
           path: spec.template.spec.terminationGracePeriodSeconds
           value: 120
 
+  - it: CUSTOM_SCRIPT_FILE is empty and no envFrom is set when customScript.content/env/envFrom are all unset
+    template: statefulset-repo.yaml
+    set:
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CUSTOM_SCRIPT_FILE
+            value: ""
+      - documentIndex: 1
+        notExists:
+          path: spec.template.spec.containers[0].envFrom
+
+  - it: sets CUSTOM_SCRIPT_FILE from customScript.content, independently of the top-level env/envFrom that land on the whole container
+    template: statefulset-repo.yaml
+    set:
+      customScript:
+        content: |
+          echo hi
+      env:
+        - name: FOO
+          value: bar
+      envFrom:
+        - secretRef:
+            name: my-secret
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CUSTOM_SCRIPT_FILE
+            value: "custom-script-myorg-myrepo.sh"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: FOO
+            value: bar
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.containers[0].envFrom
+          value:
+            - secretRef:
+                name: my-secret
+
+  - it: a repo's env/envFrom fully replace the top-level default, independently of its own customScript.content
+    template: statefulset-repo.yaml
+    set:
+      customScript:
+        content: |
+          echo shared
+      env:
+        - name: SHARED
+          value: "1"
+      repos:
+        - org: myorg
+          repo: myrepo
+          env:
+            - name: ONLY_MYREPO
+              value: "1"
+    asserts:
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CUSTOM_SCRIPT_FILE
+            # content still falls back to the top-level default since this
+            # repo's customScript key isn't set at all.
+            value: "custom-script-myorg-myrepo.sh"
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ONLY_MYREPO
+            value: "1"
+      - documentIndex: 1
+        notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SHARED
+            value: "1"
+
+  - it: two repos with identical customScript.content get the exact same checksum/scripts (pinned digests, not just isNotNull, so the assertion actually compares the two - helm-unittest can't compare one path against another directly)
+    template: statefulset-repo.yaml
+    set:
+      repos:
+        - org: alpha
+          repo: one
+          customScript:
+            content: &sharedCustomScriptContent |
+              echo same-everywhere
+        - org: beta
+          repo: two
+          customScript:
+            content: *sharedCustomScriptContent
+    asserts:
+      # Pinned to the actual digest cc-rc.agentScriptsChecksum produces for
+      # this exact input at the time this test was written - update it
+      # (re-render and copy the new value) if a static script under
+      # files/scripts/ intentionally changes.
+      - documentIndex: 1
+        equal:
+          path: spec.template.metadata.annotations["checksum/scripts"]
+          value: "1fe4d81e69d51fc00c0a004a0ceb5620c9c29ba345a1da81db4755b74c5b4ffa"
+      - documentIndex: 3
+        equal:
+          path: spec.template.metadata.annotations["checksum/scripts"]
+          value: "1fe4d81e69d51fc00c0a004a0ceb5620c9c29ba345a1da81db4755b74c5b4ffa"
+
   - it: fails when remoteControl.permissionMode is not a recognized value
     template: statefulset-repo.yaml
     set:
