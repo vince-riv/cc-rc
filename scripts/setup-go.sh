@@ -13,7 +13,7 @@ update-alternatives --install /usr/bin/go go /usr/lib/go-1.26/bin/go 126 \
 # renovate: datasource=github-releases depName=golangci/golangci-lint
 GOLANGCI_LINT_VERSION=v2.13.2
 # renovate: datasource=github-releases depName=go-delve/delve
-DELVE_VERSION=v1.27.1
+DELVE_VERSION=v1.27.2
 
 GOBIN=/usr/local/bin go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}
 GOBIN=/usr/local/bin go install github.com/go-delve/delve/cmd/dlv@${DELVE_VERSION}
