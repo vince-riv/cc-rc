@@ -74,6 +74,56 @@ at least one `repos[]` entry (`org`/`repo`). Full reference in
     `remoteControl.*`/`repos[].remoteControl.*`) directly; readiness probe checks the
     process is running, container self-exits after 45s down.
 
+## Running one agent locally
+
+`scripts/run-local.sh` runs a single agent under docker or podman, in the same shape as
+one of those StatefulSets — same image, the same orchestration scripts (copied from
+`charts/cc-rc/files/scripts` and mounted where the chart ConfigMap-mounts them), the same
+`/home/dev` + `/workspace` split, and the same first-boot `/login` flow.
+
+```sh
+export GITHUB_TOKEN=ghp_...
+scripts/run-local.sh --repo myorg/myrepo --ssh-key ~/.ssh/id_ed25519 \
+  --token-env GITHUB_TOKEN --code-dir ~/src/cc-rc-agent
+```
+
+`--token-env` names the env var holding the PAT (never the PAT itself, so it stays out of
+argv and shell history), `--ssh-key` is a key already registered with GitHub, and
+`--code-dir` is the host directory the repo is cloned into (`<code-dir>/repo`). `/home/dev`
+lives in a named volume, so claude's login survives `--recreate`; `--stop` removes the
+container, `--purge` removes the volume too. `--help` lists the rest (`--engine`,
+`--image`, `--permission-mode`, `--spawn`, `--capacity`, `--attach`, ...).
+
+Every option except `--stop`, `--purge` and `--recreate` also reads a `CC_RC_*` env var
+named after it (`--ssh-key` → `CC_RC_SSH_KEY`, `--match-host-uid` → `CC_RC_MATCH_HOST_UID=1`);
+a flag on the command line wins. Without `--repo`, the script detects `ORG/REPO` from the
+git repo in the current directory: its branch's upstream remote, then `origin`, then its
+only github.com remote. So with the other options in env vars, running the script from
+inside a clone is enough. One `--code-dir` holds one clone: the script refuses to start an
+agent on a clone of a different repo. For several repos, set `--base-code-dir DIR`
+(`CC_RC_BASE_CODE_DIR`) instead: each agent then gets `DIR/<org>/<repo>` (in lower case)
+as its code dir. An explicit `--code-dir` wins when both are set.
+
+Docker has no per-container uid mapping, so the image's `dev` user (uid 1001) usually
+differs from yours, and the script offers to chown `--code-dir` to it.
+`--match-host-uid` avoids that: it builds a derived image (once per base image) with
+`dev` renumbered to your uid:gid, so the clone stays owned by you on the host.
+Rootless podman needs neither: the script maps your uid onto `dev` with `--userns=keep-id`
+(on podman < 4.3, together with `--match-host-uid`). Rootless Docker is not supported: it
+has no keep-id, so the agent could only write a code dir that belongs to a host subuid,
+and the script stops rather than hand yours over.
+
+**Podman and rootless engines are experimental.** Only rootful Docker has run a real agent;
+the podman and rootless paths were tested with engine shims only. Only Docker and podman
+with a local daemon are supported: other engines, and a `DOCKER_HOST`, docker context or
+`CONTAINER_HOST` that is not a local socket, stop the run. On Docker Desktop for Linux
+(not WSL2) the script never chowns the code dir. The `KNOWN GAPS` comment at the top of
+`scripts/run-local.sh` lists what is unverified and what to fix next.
+
+Differences from the pod, all deliberate: no squid (local egress is unrestricted, no
+`HTTP(S)_PROXY`, git+ssh goes straight to github.com), your own SSH key instead of the
+chart's generated deploy key, and a host directory instead of the workspace PVC.
+
 ## Development
 
 ```sh

@@ -9,6 +9,11 @@ WARMUP_LOG="/tmp/cc-rc-warmup.log"
 RC_WORKTREE_MAX_AGE_DAYS="${RC_WORKTREE_MAX_AGE_DAYS:-10}"
 RC_SHUTDOWN_WAIT="${RC_SHUTDOWN_WAIT:-55}"
 RC_WARMUP_TIMEOUT="${RC_WARMUP_TIMEOUT:-120}"
+# How to get a shell in here, used in the hints printed below. The chart
+# leaves it unset and gets the kubectl form (with this container's own
+# hostname already substituted, so the hint is copy-pasteable as printed);
+# scripts/run-local.sh sets the docker/podman form.
+RC_EXEC_PREFIX="${RC_EXEC_PREFIX:-kubectl exec -it $(hostname) --}"
 
 # pgrep -f matches full command lines, including this very
 # script's own (it echoes "claude remote-control" in its
@@ -149,9 +154,9 @@ run_custom_script() {
 
 if [ ! -f "$MARKER" ]; then
   echo "No login marker at $MARKER - starting first-time claude login setup."
-  echo "Attach with: kubectl exec -it \$(hostname) -- screen -r claude-login"
+  echo "Attach with: $RC_EXEC_PREFIX screen -r claude-login"
   echo "That drops you into an interactive shell with instructions printed"
-  echo "(the same instructions show up in any 'kubectl exec -it ... -- bash' too)."
+  echo "(the same instructions show up in any '$RC_EXEC_PREFIX bash' too)."
   echo "Session output is also tailed below (and kept at $LOGIN_LOG)."
   : > "$LOGIN_LOG"
   screen -L -Logfile "$LOGIN_LOG" -dmS claude-login bash -lic 'cd /workspace/repo && exec bash -li'
@@ -181,7 +186,7 @@ fi
 NAME="${RC_NAME:-$(hostname)}-$(date +%Y%m%d-%H%M%S)"
 echo "Login already complete - starting claude remote-control (name=$NAME)."
 echo "Session output tailed below (and kept at $RC_LOG). To debug interactively:"
-echo "  kubectl exec -it \$(hostname) -- screen -r remote-control"
+echo "  $RC_EXEC_PREFIX screen -r remote-control"
 
 prune_stale_worktrees
 
@@ -224,7 +229,7 @@ while true; do
     if [ "$down_since" -eq 0 ]; then
       down_since=$now
       echo "claude remote-control is not running - exiting in up to ${RC_UNHEALTHY_TIMEOUT}s" \
-           "unless it (re)starts. Debug now: kubectl exec -it \$(hostname) -- bash"
+           "unless it (re)starts. Debug now: $RC_EXEC_PREFIX bash"
     fi
     elapsed=$(( now - down_since ))
     if [ "$elapsed" -ge "$RC_UNHEALTHY_TIMEOUT" ]; then
