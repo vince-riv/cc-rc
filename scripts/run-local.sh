@@ -484,6 +484,14 @@ done
 # Read the PAT by variable name, never as an argument: it is passed to the
 # engine as a bare `-e GH_TOKEN`, which copies the value from this process's
 # environment instead of putting it on a command line.
+# Validated first, because ${!NAME} is not a plain lookup: a NAME shaped like
+# an array reference - x[$(cmd)] - has its subscript evaluated, which runs
+# the command. --token-env usually arrives through CC_RC_TOKEN_ENV, i.e. from
+# environment the project may not have written (.envrc, a shared profile, CI).
+# The same class of input check as --repo and --name.
+case "$TOKEN_ENV" in
+  ""|[0-9]*|*[!A-Za-z0-9_]*) die "--token-env '$TOKEN_ENV' is not a valid env var name (letters, digits and _, not starting with a digit)" ;;
+esac
 TOKEN="${!TOKEN_ENV:-}"
 [ -n "$TOKEN" ] || die "env var \$$TOKEN_ENV is empty or unset - export your GitHub PAT there first"
 export GH_TOKEN="$TOKEN"
@@ -561,15 +569,25 @@ if container_exists; then
     # under the restart policy (reported, untested). So check what the
     # container really mounts, and point at --recreate, which stages it all
     # again and keeps the home volume.
-    missing=""
+    # Two different problems, reported apart - a missing mount source, and a
+    # scripts mount that exists but lacks the entrypoint (the empty-dir case) -
+    # with one path per line, so a path containing spaces stays unambiguous.
+    nl=$'\n'
+    missing_mounts=""
     while IFS= read -r bind_src; do
-      [ -z "$bind_src" ] || [ -e "$bind_src" ] || missing="$missing $bind_src"
+      [ -z "$bind_src" ] || [ -e "$bind_src" ] || missing_mounts+="${nl}  $bind_src"
     done < <("$ENGINE" container inspect -f '{{range .Mounts}}{{if eq .Type "bind"}}{{.Source}}{{"\n"}}{{end}}{{end}}' "$CONTAINER" 2>/dev/null || true)
+    missing_entrypoint=""
     scripts_src="$("$ENGINE" container inspect -f '{{range .Mounts}}{{if eq .Destination "/opt/cc-rc/scripts"}}{{.Source}}{{end}}{{end}}' "$CONTAINER" 2>/dev/null || true)"
     if [ -d "$scripts_src" ] && [ ! -f "$scripts_src/agent-entrypoint.sh" ]; then
-      missing="$missing $scripts_src/agent-entrypoint.sh"
+      missing_entrypoint="${nl}  $scripts_src/agent-entrypoint.sh"
     fi
-    [ -z "$missing" ] || die "$CONTAINER cannot start - host paths it mounts are gone:$missing. Re-run with --recreate: it stages them again and keeps the home volume, so the claude login survives."
+    if [ -n "$missing_mounts" ] || [ -n "$missing_entrypoint" ]; then
+      problems=""
+      [ -z "$missing_mounts" ] || problems+="${nl}Host paths it bind-mounts no longer exist:$missing_mounts"
+      [ -z "$missing_entrypoint" ] || problems+="${nl}Its scripts mount is incomplete - this file is missing:$missing_entrypoint"
+      die "$CONTAINER cannot start.$problems${nl}Re-run with --recreate: it stages these again and keeps the home volume, so the claude login survives."
+    fi
     echo "Starting existing container $CONTAINER - it keeps the scripts and git config it was created with; use --recreate to pick up edits..."
     "$ENGINE" start "$CONTAINER" >/dev/null
     echo "Started. Logs: $ENGINE logs -f $CONTAINER"
