@@ -928,10 +928,19 @@ echo "==> agent ($CONTAINER)"
 
 echo
 echo "Container $CONTAINER is up. Repo is at $CODE_DIR/repo."
+
+# Every printed command names the container by --name (it always identifies it;
+# --repo would re-derive cc-rc-<slug>, which is wrong after a custom --name) and
+# the engine by --engine (a bare --stop could pick docker on a host that also
+# has podman). Shell-quoted, so a command copied from here still works when the
+# script's or the engine's path contains spaces.
+hint_self="$(printf '%q' "$0")"
+hint_engine="$(printf '%q' "$ENGINE")"
+hint_name="$(printf '%q' "$CONTAINER")"
 if [ "$FIRST_BOOT" -eq 1 ]; then
   cat <<FIRSTBOOT
 claude is not logged in yet. Finish the one-time login:
-  1. $ENGINE exec -it $CONTAINER screen -r claude-login
+  1. $hint_engine exec -it $hint_name screen -r claude-login
   2. Run: claude      then, inside claude: /login
   3. Run: cc-rc-finish-login
 The container restarts itself into remote-control mode a few seconds later.
@@ -942,11 +951,11 @@ else
 fi
 cat <<HINTS
 
-  Logs:            $ENGINE logs -f $CONTAINER
-  Agent session:   $ENGINE exec -it $CONTAINER screen -r remote-control
-  Shell:           $ENGINE exec -it $CONTAINER bash
-  Stop + remove:   $0 --repo $REPO --stop
-  Also drop login: $0 --repo $REPO --purge
+  Logs:            $hint_engine logs -f $hint_name
+  Agent session:   $hint_engine exec -it $hint_name screen -r remote-control
+  Shell:           $hint_engine exec -it $hint_name bash
+  Stop + remove:   $hint_self --engine $hint_engine --name $hint_name --stop
+  Also drop login: $hint_self --engine $hint_engine --name $hint_name --purge
 HINTS
 
 wait_for_screen() {
