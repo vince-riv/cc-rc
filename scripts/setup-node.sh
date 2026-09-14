@@ -12,7 +12,7 @@ set -euo pipefail
 # renovate: datasource=node-version depName=node-22
 NODE22_VERSION=22.23.2
 # renovate: datasource=node-version depName=node-24
-NODE24_VERSION=24.20.0
+NODE24_VERSION=24.21.0
 # renovate: datasource=node-version depName=node-26
 NODE26_VERSION=26.8.2
 
