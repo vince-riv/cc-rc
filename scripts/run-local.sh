@@ -339,11 +339,9 @@ command -v "$ENGINE" >/dev/null 2>&1 || die "engine '$ENGINE' is not on PATH"
 # rootless checks under "validate run inputs". Docker's security options are
 # captured before matching: grep -q under pipefail can fail a pipeline that
 # did match, by closing the pipe on docker early. (Gaps 1, 3 and 4.)
-ENGINE_IS_PODMAN=0
 ROOTLESS_PODMAN=0
 ROOTLESS_DOCKER=0
 if podman_rootless="$("$ENGINE" info --format '{{.Host.Security.Rootless}}' 2>/dev/null)"; then
-  ENGINE_IS_PODMAN=1
   [ "$podman_rootless" != "true" ] || ROOTLESS_PODMAN=1
   # Only for "run": --stop and --purge use nothing engine-specific.
   [ "$ACTION" != "run" ] || echo "Note: podman support is experimental - see KNOWN GAPS at the top of $0." >&2
@@ -548,7 +546,9 @@ if container_exists; then
     echo "Re-run with --recreate to replace it."
     exit 0
   else
-    echo "Starting existing container $CONTAINER (use --recreate to rebuild it)..."
+    # A stopped container keeps the scripts and git config staged when it was
+    # created (see "staged files"), so edits to either need --recreate.
+    echo "Starting existing container $CONTAINER - it keeps the scripts and git config it was created with; use --recreate to pick up edits..."
     "$ENGINE" start "$CONTAINER" >/dev/null
     echo "Started. Logs: $ENGINE logs -f $CONTAINER"
     exit 0
@@ -582,7 +582,11 @@ MOUNT_RW=""
 # a copy in the state dir (see "staged files") rather than from your cc-rc
 # checkout: the only dir of yours that gets relabeled is --code-dir.
 # (Gap 8: untested on a real SELinux host.)
-if command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled 2>/dev/null; then
+# SELinux is on when the kernel exposes /sys/fs/selinux/enforce, which needs no
+# package; selinuxenabled ships in an optional one (libselinux-utils or
+# selinux-utils) that minimal installs often lack. The file, not the dir: WSL
+# has an empty /sys/fs/selinux.
+if [ -e /sys/fs/selinux/enforce ] || { command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled 2>/dev/null; }; then
   MOUNT_RO=":ro,z"
   MOUNT_RW=":z"
 fi
@@ -731,14 +735,22 @@ printf '%s\n' "$VOLUME" > "$STATE_DIR/volume"
 
 # The orchestration scripts get mounted from this copy, not from --scripts-dir:
 # :z on SELinux hosts relabels whatever host path it is given, and
-# --scripts-dir defaults to a dir inside your cc-rc checkout. Refreshed on every
-# run, so edited scripts take effect on the next run of this script - not on a
-# restart of a running container, which keeps the copy it started with, the
-# same way a pod keeps its ConfigMap until it rolls. rm first, so a script
+# --scripts-dir defaults to a dir inside your cc-rc checkout.
+#
+# The mount is live - a container sees the copy's current contents, not a
+# snapshot - so the copy may only change while no container uses it. That
+# holds because this point is only reached when no container of this name
+# exists: "existing container" above exits for a running or a stopped one,
+# and --recreate removes it first. So script edits take effect on a fresh run
+# or with --recreate; starting a stopped container reuses the copy as it is.
+#
+# Emptied in place, not removed and re-created: replacing the dir orphans any
+# bind mount of it - a running container then sees an empty dir, and on Docker
+# Desktop a stopped one can no longer start at all. Emptied first, so a script
 # removed from --scripts-dir does not linger in the copy.
 STAGED_SCRIPTS="$STATE_DIR/scripts"
-rm -rf "$STAGED_SCRIPTS"
 mkdir -p "$STAGED_SCRIPTS"
+find "$STAGED_SCRIPTS" -mindepth 1 -delete
 cp -R "$SCRIPTS_DIR/." "$STAGED_SCRIPTS/"
 chmod -R a+rX "$STAGED_SCRIPTS"
 cat > "$STATE_DIR/gitconfig" <<GITCONFIG
