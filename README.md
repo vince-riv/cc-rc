@@ -114,8 +114,11 @@ has no keep-id, so the agent could only write a code dir that belongs to a host 
 and the script stops rather than hand yours over.
 
 **Podman and rootless engines are experimental.** Only rootful Docker has run a real agent;
-the podman and rootless paths were tested with engine shims only. The `KNOWN GAPS` comment
-at the top of `scripts/run-local.sh` lists what is unverified and what to fix next.
+the podman and rootless paths were tested with engine shims only. Only Docker and podman
+with a local daemon are supported: other engines, and a `DOCKER_HOST`, docker context or
+`CONTAINER_HOST` that is not a local socket, stop the run. On Docker Desktop for Linux
+(not WSL2) the script never chowns the code dir. The `KNOWN GAPS` comment at the top of
+`scripts/run-local.sh` lists what is unverified and what to fix next.
 
 Differences from the pod, all deliberate: no squid (local egress is unrestricted, no
 `HTTP(S)_PROXY`, git+ssh goes straight to github.com), your own SSH key instead of the

@@ -39,11 +39,14 @@
 #      error and costs a derived-image build.
 #   3. Rootless dockerd is untested. Detection relies on "name=rootless" in
 #      docker info's SecurityOptions.
-#   4. Docker Desktop for Linux is unverified. If its daemon reports
-#      name=rootless, the rootless-Docker stop blocks it, although its bind
-#      mounts may translate ownership (Docker Desktop on Windows/WSL2 does not
-#      report it). Fix idea: in that branch, probe whether dev can create a
-#      file in the code dir, and stop only if it cannot.
+#   4. Docker Desktop for Linux (not WSL2) is untested. Its docker info does
+#      not report name=rootless (seen on engine 27.2.0), so the rootless-Docker
+#      stop does not fire. But Docker's FAQ documents that up to Desktop 4.34
+#      it maps your uid:gid to 0 inside containers, where the Docker-style
+#      chown would hand --code-dir to a host subuid; 4.35 and later are
+#      undocumented. So the script never chowns there and prints a note. If
+#      the agent cannot write the code dir, its ownership needs fixing by hand.
+#      (On WSL2, Docker Desktop passes uids through; the chown path is tested.)
 #   5. macOS is untested. Ownership checks are skipped on Darwin, on the
 #      assumption that its engines (Docker Desktop, podman machine) translate
 #      bind-mount ownership.
@@ -63,6 +66,11 @@
 #      --scripts-dir (SCRIPT_DIR/../charts/...) points at the wrong place. The
 #      run stops with a clear "is not a directory" error, and --scripts-dir
 #      works around it; resolving the link would fix it.
+#  11. Only a local engine is supported, and only Docker or podman: the run
+#      stops for a DOCKER_HOST or docker context that is not a local socket,
+#      for a CONTAINER_HOST that is not unix://, and for any other engine.
+#      podman's default system connection (e.g. podman machine on macOS, which
+#      uses ssh:// to its VM) is NOT checked.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -141,9 +149,10 @@ Required (for the default "run" action):
 
 Options:
   -i, --image REF          Image (default: $IMAGE)
-  -e, --engine NAME        docker or podman (default: first one found).
-                           Podman and rootless engines are experimental - see
-                           KNOWN GAPS at the top of this script
+  -e, --engine NAME        docker or podman, with a local daemon (default:
+                           first one found). Other engines and remote
+                           endpoints stop the run. Podman and rootless engines
+                           are experimental - see KNOWN GAPS at the top
   -n, --name NAME          Container name (default: cc-rc-<org>-<repo>)
       --volume NAME        Home volume name (default: cc-rc-home-<org>-<repo>)
       --scripts-dir DIR    Orchestration scripts, copied into the state dir and
@@ -349,20 +358,58 @@ command -v "$ENGINE" >/dev/null 2>&1 || die "engine '$ENGINE' is not on PATH"
 # did match, by closing the pipe on docker early. (Gaps 1, 3 and 4.)
 ROOTLESS_PODMAN=0
 ROOTLESS_DOCKER=0
+DESKTOP_LINUX=0
 if podman_rootless="$("$ENGINE" info --format '{{.Host.Security.Rootless}}' 2>/dev/null)"; then
   [ "$podman_rootless" != "true" ] || ROOTLESS_PODMAN=1
   # Only for "run": --stop and --purge use nothing engine-specific.
-  [ "$ACTION" != "run" ] || echo "Note: podman support is experimental - see KNOWN GAPS at the top of $0." >&2
+  if [ "$ACTION" = "run" ]; then
+    echo "Note: podman support is experimental - see KNOWN GAPS at the top of $0." >&2
+    # A remote podman service would look up --code-dir and the state dir on
+    # its own machine. (Gap 11: podman's default system connection is not
+    # checked, only CONTAINER_HOST.)
+    case "${CONTAINER_HOST:-}" in
+      ""|unix://*) ;;
+      *) die "CONTAINER_HOST is $CONTAINER_HOST, not a local socket. run-local.sh bind-mounts host paths (--code-dir, the state dir), and a remote podman would look those up on its own machine - unset CONTAINER_HOST to use a local podman." ;;
+    esac
+  fi
 else
   # The template also fails on a podman whose info lacks that field (podman
   # 2.x used another schema, and a future rename would do the same). Taking
   # that podman for Docker would skip every rootless guard and end in a chown
   # to a host subuid, so ask the command what it is before assuming Docker.
-  # Only "run" is at risk; --stop and --purge work the same on both engines.
+  # The same goes for any engine that is neither podman nor Docker (nerdctl,
+  # say): it would inherit Docker's rootless, ownership and SELinux
+  # assumptions without a word, so only Docker is let through here.
+  # Only "run" is at risk; --stop and --purge work the same on these engines.
   if [ "$ACTION" = "run" ]; then
-    case "$("$ENGINE" --version 2>/dev/null || true)" in
+    engine_version="$("$ENGINE" --version 2>/dev/null | head -n 1 || true)"
+    case "$engine_version" in
       [Pp]odman*) die "$ENGINE reports itself as podman, but its info has no .Host.Security.Rootless, so this script cannot tell whether it runs rootless - it stops rather than guess. Use a newer podman." ;;
+      Docker*) ;;
+      *) die "$ENGINE is neither Docker nor podman (its --version says: ${engine_version:-nothing}). run-local.sh supports only those two: its rootless, ownership and SELinux handling assumes one of them." ;;
     esac
+
+    # A remote daemon would look up --code-dir and the state dir on its own
+    # machine, so every bind mount and ownership check would describe the
+    # wrong filesystem. DOCKER_HOST wins over the current docker context, as it
+    # does for the docker CLI itself. (Gap 11.)
+    docker_endpoint="${DOCKER_HOST:-$("$ENGINE" context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)}"
+    case "$docker_endpoint" in
+      ""|unix://*|npipe://*) ;;
+      *) die "the Docker endpoint is $docker_endpoint, not a local socket. run-local.sh bind-mounts host paths (--code-dir, the state dir), and a remote daemon would look those up on its own machine - point DOCKER_HOST or the docker context at a local daemon." ;;
+    esac
+
+    # Docker Desktop for Linux, but not on WSL2, where uids pass through and
+    # the chown path is tested: see Gap 4. Detected here, acted on under
+    # "validate run inputs" and in needs_chown. WSL is recognized by its
+    # distro variable or by "microsoft" in the kernel release.
+    if [ "$("$ENGINE" info --format '{{.OperatingSystem}}' 2>/dev/null || true)" = "Docker Desktop" ] \
+       && [ "$(uname -s)" = "Linux" ] && [ -z "${WSL_DISTRO_NAME:-}" ]; then
+      case "$(uname -r)" in
+        *[Mm]icrosoft*) ;;
+        *) DESKTOP_LINUX=1 ;;
+      esac
+    fi
   fi
   security_opts="$("$ENGINE" info --format '{{json .SecurityOptions}}' 2>/dev/null || true)"
   case "$security_opts" in
@@ -522,10 +569,17 @@ fi
 # so dev can only write the code dir once it belongs to a host subuid - which
 # takes it away from you. Docker has no keep-id to map you onto dev, and
 # --match-host-uid cannot help either (dev would have to be container root).
-# (Gap 3: untested on a real rootless dockerd. Gap 4: may wrongly stop Docker
-# Desktop for Linux, if its daemon reports name=rootless.)
+# (Gap 3: untested on a real rootless dockerd.)
 if [ "$ROOTLESS_DOCKER" -eq 1 ] && [ "$CHOWN" != "no" ]; then
   die "rootless Docker maps your uid to container root, but the agent runs as the image's dev user, so it cannot write $CODE_DIR unless the dir is handed to a host subuid you cannot write as. Use rootful Docker, or rootless podman (it maps your uid onto dev with --userns=keep-id) - or pass --no-chown to try anyway."
+fi
+
+# Docker Desktop for Linux maps file ownership through its VM - up to 4.34 it
+# maps your uid:gid to 0 inside containers - so a Docker-style chown could hand
+# --code-dir to a host subuid. It is never chowned there, even with --chown.
+# (Gap 4: untested on a real host.)
+if [ "$DESKTOP_LINUX" -eq 1 ]; then
+  echo "Note: Docker Desktop for Linux maps file ownership through its VM, so run-local.sh never chowns $CODE_DIR here (Gap 4 in KNOWN GAPS). If the agent cannot write it, fix its ownership by hand." >&2
 fi
 
 # Rootless podman, with either keep-id form: the agent writes as you, so the
@@ -739,6 +793,7 @@ needs_chown() {
   [ "$(uname -s)" = "Darwin" ] && return 1
   [ "$ROOTLESS_PODMAN" -eq 1 ] && return 1
   [ "$ROOTLESS_DOCKER" -eq 1 ] && return 1
+  [ "$DESKTOP_LINUX" -eq 1 ] && return 1
   [ "$(host_uid_of "$CODE_DIR")" != "$DEV_UID" ]
 }
 
