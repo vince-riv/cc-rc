@@ -77,8 +77,8 @@ at least one `repos[]` entry (`org`/`repo`). Full reference in
 ## Running one agent locally
 
 `scripts/run-local.sh` runs a single agent under docker or podman, in the same shape as
-one of those StatefulSets — same image, the same orchestration scripts (bind-mounted from
-`charts/cc-rc/files/scripts` where the chart ConfigMap-mounts them), the same
+one of those StatefulSets — same image, the same orchestration scripts (copied from
+`charts/cc-rc/files/scripts` and mounted where the chart ConfigMap-mounts them), the same
 `/home/dev` + `/workspace` split, and the same first-boot `/login` flow.
 
 ```sh

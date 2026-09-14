@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs one cc-rc agent locally under docker or podman, in the same shape as the
 # per-repo StatefulSet the chart deploys: same image, the same orchestration
-# scripts (charts/cc-rc/files/scripts, bind-mounted where the chart
+# scripts (charts/cc-rc/files/scripts, copied and mounted where the chart
 # ConfigMap-mounts them), the same /home/dev + /workspace split, and the same
 # `claude remote-control` startup and first-boot /login flow.
 #
@@ -30,8 +30,9 @@
 # not how those engines really behave. Code sites are marked "Gap N".
 #   1. Real podman is untested: both keep-id forms, the podman < 4.3 fallback
 #      (plain keep-id + --match-host-uid), detecting podman behind a `docker`
-#      command (podman-docker), and SELinux :z relabeling. Rootful podman
-#      takes the Docker-style chown path, also untested.
+#      command (podman-docker), and stopping on a podman whose info lacks
+#      .Host.Security.Rootless. Rootful podman takes the Docker-style chown
+#      path, also untested.
 #   2. The keep-id:uid=,gid= probe discards its output. If it fails for a
 #      reason other than missing support, the script silently falls back to
 #      plain keep-id + --match-host-uid - that still works, but hides the real
@@ -50,8 +51,10 @@
 #      recipe - and nothing removes old ones.
 #   7. In a derived image, a dozen ~/.nvm symlinks can keep the old gid (an
 #      lchown quirk seen on Docker Desktop/overlayfs). Harmless; see the recipe.
-#   8. SELinux :z relabeling is only applied for podman. Rootful Docker on an
-#      SELinux-enforcing host gets no relabel and will likely hit mount denials.
+#   8. SELinux :z relabeling (both engines) is untested on a real SELinux host.
+#      :z relabels a host path recursively: --code-dir gets relabeled, while
+#      the scripts are mounted from a copy in the state dir, so your cc-rc
+#      checkout does not.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -135,7 +138,8 @@ Options:
                            KNOWN GAPS at the top of this script
   -n, --name NAME          Container name (default: cc-rc-<org>-<repo>)
       --volume NAME        Home volume name (default: cc-rc-home-<org>-<repo>)
-      --scripts-dir DIR    Orchestration scripts to mount at /opt/cc-rc/scripts
+      --scripts-dir DIR    Orchestration scripts, copied into the state dir and
+                           mounted at /opt/cc-rc/scripts
                            (default: charts/cc-rc/files/scripts in this repo)
       --git-name NAME      git user.name (default: your global git config)
       --git-email EMAIL    git user.email (default: your global git config)
@@ -341,8 +345,19 @@ ROOTLESS_DOCKER=0
 if podman_rootless="$("$ENGINE" info --format '{{.Host.Security.Rootless}}' 2>/dev/null)"; then
   ENGINE_IS_PODMAN=1
   [ "$podman_rootless" != "true" ] || ROOTLESS_PODMAN=1
-  echo "Note: podman support is experimental - see KNOWN GAPS at the top of $0." >&2
+  # Only for "run": --stop and --purge use nothing engine-specific.
+  [ "$ACTION" != "run" ] || echo "Note: podman support is experimental - see KNOWN GAPS at the top of $0." >&2
 else
+  # The template also fails on a podman whose info lacks that field (podman
+  # 2.x used another schema, and a future rename would do the same). Taking
+  # that podman for Docker would skip every rootless guard and end in a chown
+  # to a host subuid, so ask the command what it is before assuming Docker.
+  # Only "run" is at risk; --stop and --purge work the same on both engines.
+  if [ "$ACTION" = "run" ]; then
+    case "$("$ENGINE" --version 2>/dev/null || true)" in
+      [Pp]odman*) die "$ENGINE reports itself as podman, but its info has no .Host.Security.Rootless, so this script cannot tell whether it runs rootless - it stops rather than guess. Use a newer podman." ;;
+    esac
+  fi
   security_opts="$("$ENGINE" info --format '{{json .SecurityOptions}}' 2>/dev/null || true)"
   case "$security_opts" in
     *name=rootless*) ROOTLESS_DOCKER=1 ;;
@@ -556,14 +571,18 @@ case "${DEV_UID:-}:${DEV_GID:-}" in
   *[!0-9:]*|:*|*:) die "could not read the image's uid/gid (got: '$DEV_IDS')" ;;
 esac
 
-# SELinux-enforcing hosts (podman's usual home) deny a container access to an
+# SELinux-enforcing hosts (the default on Fedora and RHEL) deny a container access to an
 # unlabeled bind mount; :z relabels it as shared container content. Suffixes
 # rather than a bare flag, because read-only mounts already carry a mode
 # field (":ro,z") and read-write ones do not (":z").
 MOUNT_RO=":ro"
 MOUNT_RW=""
-# (Gap 1: untested. Gap 8: rootful Docker on an SELinux host gets no :z.)
-if [ "$ENGINE_IS_PODMAN" -eq 1 ] && command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled 2>/dev/null; then
+# Docker and podman both support :z, so this applies to either engine. :z
+# relabels a host path recursively, which is why the scripts get mounted from
+# a copy in the state dir (see "staged files") rather than from your cc-rc
+# checkout: the only dir of yours that gets relabeled is --code-dir.
+# (Gap 8: untested on a real SELinux host.)
+if command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled 2>/dev/null; then
   MOUNT_RO=":ro,z"
   MOUNT_RW=":z"
 fi
@@ -709,6 +728,19 @@ mkdir -p "$STATE_DIR"
 # Recorded for --purge, which may run after --stop removed the container, and
 # without the --volume or --repo this run derived the volume name from.
 printf '%s\n' "$VOLUME" > "$STATE_DIR/volume"
+
+# The orchestration scripts get mounted from this copy, not from --scripts-dir:
+# :z on SELinux hosts relabels whatever host path it is given, and
+# --scripts-dir defaults to a dir inside your cc-rc checkout. Refreshed on every
+# run, so edited scripts take effect on the next run of this script - not on a
+# restart of a running container, which keeps the copy it started with, the
+# same way a pod keeps its ConfigMap until it rolls. rm first, so a script
+# removed from --scripts-dir does not linger in the copy.
+STAGED_SCRIPTS="$STATE_DIR/scripts"
+rm -rf "$STAGED_SCRIPTS"
+mkdir -p "$STAGED_SCRIPTS"
+cp -R "$SCRIPTS_DIR/." "$STAGED_SCRIPTS/"
+chmod -R a+rX "$STAGED_SCRIPTS"
 cat > "$STATE_DIR/gitconfig" <<GITCONFIG
 [user]
 	name = $GIT_NAME
@@ -782,7 +814,7 @@ phase "prep-home (home volume owned by $DEV_UID:$DEV_GID)" \
 # wait-for-squid is skipped on purpose: there is no proxy to wait for here.
 phase "seed-home (sync ~/.claude from the image onto the home volume)" \
   -v "$VOLUME:/mnt/home-pvc" \
-  -v "$SCRIPTS_DIR:/opt/cc-rc/scripts$MOUNT_RO" \
+  -v "$STAGED_SCRIPTS:/opt/cc-rc/scripts$MOUNT_RO" \
   "$IMAGE" bash /opt/cc-rc/scripts/seed-home.sh
 
 # SQUID_HOST/SQUID_PORT empty: seed-ssh.sh then writes an ~/.ssh/config with
@@ -791,7 +823,7 @@ phase "seed-ssh (install the key, ssh config and known_hosts)" \
   -e SQUID_HOST= -e SQUID_PORT= \
   -v "$VOLUME:/mnt/home-pvc" \
   -v "$KEY_MOUNT:/mnt/ssh-key$MOUNT_RO" \
-  -v "$SCRIPTS_DIR:/opt/cc-rc/scripts$MOUNT_RO" \
+  -v "$STAGED_SCRIPTS:/opt/cc-rc/scripts$MOUNT_RO" \
   "$IMAGE" bash /opt/cc-rc/scripts/seed-ssh.sh
 
 phase "clone-repo ($REPO -> $CODE_DIR/repo)" \
@@ -800,7 +832,7 @@ phase "clone-repo ($REPO -> $CODE_DIR/repo)" \
   -v "$CODE_DIR:/workspace$MOUNT_RW" \
   -v "$STATE_DIR/gitconfig:/home/dev/.gitconfig$MOUNT_RO" \
   -v "$STATE_DIR/gitignore_global:/home/dev/.gitignore_global$MOUNT_RO" \
-  -v "$SCRIPTS_DIR:/opt/cc-rc/scripts$MOUNT_RO" \
+  -v "$STAGED_SCRIPTS:/opt/cc-rc/scripts$MOUNT_RO" \
   "$IMAGE" bash /opt/cc-rc/scripts/clone-repo.sh
 
 # --- agent ------------------------------------------------------------------
@@ -839,7 +871,7 @@ echo "==> agent ($CONTAINER)"
   -v "$CODE_DIR:/workspace$MOUNT_RW" \
   -v "$STATE_DIR/gitconfig:/home/dev/.gitconfig$MOUNT_RO" \
   -v "$STATE_DIR/gitignore_global:/home/dev/.gitignore_global$MOUNT_RO" \
-  -v "$SCRIPTS_DIR:/opt/cc-rc/scripts$MOUNT_RO" \
+  -v "$STAGED_SCRIPTS:/opt/cc-rc/scripts$MOUNT_RO" \
   "$IMAGE" bash /opt/cc-rc/scripts/agent-entrypoint.sh >/dev/null
 
 echo
