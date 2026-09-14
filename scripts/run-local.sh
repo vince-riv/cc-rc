@@ -55,6 +55,10 @@
 #      :z relabels a host path recursively: --code-dir gets relabeled, while
 #      the scripts are mounted from a copy in the state dir, so your cc-rc
 #      checkout does not.
+#   9. Deleting the state dir (or the code dir) under a RUNNING agent breaks
+#      its next automatic restart: the engine's restart policy never runs this
+#      script, so nothing checks the mounts. Only starting a stopped container
+#      through this script is guarded.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -548,6 +552,24 @@ if container_exists; then
   else
     # A stopped container keeps the scripts and git config staged when it was
     # created (see "staged files"), so edits to either need --recreate.
+    #
+    # Those - and the code dir - are bind mounts of host paths, and nothing
+    # else guarantees they still exist: the state dir can pass for a cache.
+    # With one gone, Docker Desktop refuses to start the container with an
+    # opaque runc mount error (tested); an engine that re-creates missing bind
+    # sources as empty dirs would instead crash-loop on a missing entrypoint
+    # under the restart policy (reported, untested). So check what the
+    # container really mounts, and point at --recreate, which stages it all
+    # again and keeps the home volume.
+    missing=""
+    while IFS= read -r bind_src; do
+      [ -z "$bind_src" ] || [ -e "$bind_src" ] || missing="$missing $bind_src"
+    done < <("$ENGINE" container inspect -f '{{range .Mounts}}{{if eq .Type "bind"}}{{.Source}}{{"\n"}}{{end}}{{end}}' "$CONTAINER" 2>/dev/null || true)
+    scripts_src="$("$ENGINE" container inspect -f '{{range .Mounts}}{{if eq .Destination "/opt/cc-rc/scripts"}}{{.Source}}{{end}}{{end}}' "$CONTAINER" 2>/dev/null || true)"
+    if [ -d "$scripts_src" ] && [ ! -f "$scripts_src/agent-entrypoint.sh" ]; then
+      missing="$missing $scripts_src/agent-entrypoint.sh"
+    fi
+    [ -z "$missing" ] || die "$CONTAINER cannot start - host paths it mounts are gone:$missing. Re-run with --recreate: it stages them again and keeps the home volume, so the claude login survives."
     echo "Starting existing container $CONTAINER - it keeps the scripts and git config it was created with; use --recreate to pick up edits..."
     "$ENGINE" start "$CONTAINER" >/dev/null
     echo "Started. Logs: $ENGINE logs -f $CONTAINER"
