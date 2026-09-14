@@ -290,6 +290,10 @@ command -v "$ENGINE" >/dev/null 2>&1 || die "engine '$ENGINE' is not on PATH"
 
 # --- names ------------------------------------------------------------------
 
+# Whether --volume/CC_RC_VOLUME named the volume, before a name gets derived.
+VOLUME_GIVEN=0
+[ -z "$VOLUME" ] || VOLUME_GIVEN=1
+
 ORG=""
 NAME_PART=""
 if [ -n "$REPO" ]; then
@@ -325,6 +329,21 @@ container_running() { [ "$("$ENGINE" container inspect -f '{{.State.Running}}' "
 # --- stop / purge -----------------------------------------------------------
 
 if [ "$ACTION" = "stop" ] || [ "$ACTION" = "purge" ]; then
+  # The volume --purge removes, best source first: an explicit --volume; the
+  # volume the container really has at /home/dev; the name recorded at run
+  # time (still there after an earlier --stop); the name derived above. That
+  # last one alone can be wrong: a run with a custom --name still names its
+  # volume after the repo, not after the container.
+  if [ "$ACTION" = "purge" ] && [ "$VOLUME_GIVEN" -eq 0 ]; then
+    known_volume=""
+    if container_exists; then
+      known_volume="$("$ENGINE" container inspect -f '{{range .Mounts}}{{if eq .Destination "/home/dev"}}{{.Name}}{{end}}{{end}}' "$CONTAINER" 2>/dev/null || true)"
+    fi
+    if [ -z "$known_volume" ] && [ -f "$STATE_ROOT/$CONTAINER/volume" ]; then
+      known_volume="$(cat "$STATE_ROOT/$CONTAINER/volume")"
+    fi
+    VOLUME="${known_volume:-$VOLUME}"
+  fi
   if container_exists; then
     echo "Stopping $CONTAINER (up to ${STOP_TIMEOUT}s for claude to exit cleanly)..."
     "$ENGINE" stop -t "$STOP_TIMEOUT" "$CONTAINER" >/dev/null || true
@@ -334,12 +353,20 @@ if [ "$ACTION" = "stop" ] || [ "$ACTION" = "purge" ]; then
     echo "No container named $CONTAINER."
   fi
   if [ "$ACTION" = "purge" ]; then
-    if "$ENGINE" volume inspect "$VOLUME" >/dev/null 2>&1; then
-      "$ENGINE" volume rm "$VOLUME" >/dev/null
-      echo "Removed home volume $VOLUME (claude login state is gone - next run logs in again)."
-    else
-      echo "No volume named $VOLUME."
+    if ! "$ENGINE" volume inspect "$VOLUME" >/dev/null 2>&1; then
+      # Never a quiet success: whoever runs --purge expects the claude login
+      # state to be gone afterwards.
+      echo "$0: no volume named $VOLUME - nothing was purged." >&2
+      leftover="$("$ENGINE" volume ls --format '{{.Name}}' 2>/dev/null | grep '^cc-rc-home-' || true)"
+      if [ -n "$leftover" ]; then
+        echo "These cc-rc home volumes still exist; pass --volume NAME to purge one:" >&2
+        printf '%s\n' "$leftover" | sed 's/^/  /' >&2
+      fi
+      exit 1
     fi
+    "$ENGINE" volume rm "$VOLUME" >/dev/null
+    echo "Removed home volume $VOLUME (claude login state is gone - next run logs in again)."
+    rm -rf "${STATE_ROOT:?}/$CONTAINER"
     echo "Left the code directory alone - delete it yourself if you want it gone."
   fi
   exit 0
@@ -450,17 +477,28 @@ if [ "$(basename "$ENGINE")" = "podman" ] && command -v selinuxenabled >/dev/nul
 fi
 
 # Rootless podman maps your host uid to container root, which would leave the
-# bind-mounted /workspace unwritable by `dev`. keep-id remaps it so your host
-# uid *is* `dev` inside the container - no chown of your files needed. Probed
-# rather than version-checked: the uid=/gid= form needs podman >= 4.3.
+# bind-mounted /workspace unwritable by `dev`. keep-id fixes that without a
+# chown, in one of two forms - probed, not version-checked:
+# - podman >= 4.3: keep-id:uid=,gid= maps your uid straight onto dev's.
+# - older podman (Ubuntu 22.04 ships 3.4): plain keep-id maps your uid onto the
+#   same uid inside, so dev must have your uid. --match-host-uid's derived
+#   image gives it exactly that, so it gets turned on.
+# A chown is never the answer here: inside a rootless container, files chowned
+# to dev land on a host subuid that you cannot write as.
 USERNS=()
 KEEP_ID=0
 if [ "$(basename "$ENGINE")" = "podman" ] && [ "$("$ENGINE" info --format '{{.Host.Security.Rootless}}' 2>/dev/null || echo false)" = "true" ]; then
   if "$ENGINE" run --rm "--userns=keep-id:uid=$DEV_UID,gid=$DEV_GID" "$IMAGE" true >/dev/null 2>&1; then
     USERNS=("--userns=keep-id:uid=$DEV_UID,gid=$DEV_GID")
     KEEP_ID=1
+  elif "$ENGINE" run --rm --userns=keep-id "$IMAGE" true >/dev/null 2>&1; then
+    USERNS=("--userns=keep-id")
+    if [ "$MATCH_HOST_UID" -eq 0 ]; then
+      echo "Note: this podman has no --userns=keep-id:uid=,gid= - turning on --match-host-uid, so plain keep-id maps your uid onto dev."
+      MATCH_HOST_UID=1
+    fi
   else
-    echo "Note: this podman does not support --userns=keep-id:uid=,gid= - falling back to chowning mounts." >&2
+    die "this rootless podman supports no --userns=keep-id, and a chown would hand $CODE_DIR to a host subuid you cannot write as - use a newer podman, rootful podman, or docker"
   fi
 fi
 
@@ -482,9 +520,12 @@ if [ "$MATCH_HOST_UID" -eq 1 ]; then
   else
     base_id="$("$ENGINE" image inspect -f '{{.Id}}' "$IMAGE")"
     base_id="${base_id#sha256:}"
-    # Frees the target ids first (Ubuntu images ship an `ubuntu` user at
-    # 1000), then renumbers dev and re-owns what it owns in its home and in
-    # /workspace. Not the whole filesystem: tarballs extracted as root keep
+    # First moves any other user or group holding the target uid or gid to a
+    # free id (Ubuntu images ship `ubuntu` at 1000:1000). Moved, not deleted:
+    # a group that is still some user's primary group cannot be deleted, and
+    # dev itself holding one of the ids (only the other one differs) is no
+    # conflict at all. Then renumbers dev and re-owns what it owns in its home
+    # and in /workspace. Not the whole filesystem: tarballs extracted as root keep
     # their packager's uid - nodejs.org's is 1001, the same as dev's - and
     # re-owning those only copies hundreds of MB into the new layer. A dozen
     # of ~/.nvm's symlinks can keep the old gid - in testing (Docker Desktop,
@@ -496,11 +537,11 @@ if [ "$MATCH_HOST_UID" -eq 1 ]; then
 FROM $IMAGE
 USER root
 RUN set -eu; \\
+    free_id() { i=60000; while getent "\$1" "\$i" >/dev/null; do i=\$((i - 1)); done; echo "\$i"; }; \\
     u="\$(getent passwd $HOST_UID | cut -d: -f1)"; \\
-    if [ -n "\$u" ] && [ "\$u" != dev ]; then userdel -r "\$u" 2>/dev/null || true; fi; \\
-    if getent passwd $HOST_UID >/dev/null; then echo "uid $HOST_UID is still taken" >&2; exit 1; fi; \\
+    if [ -n "\$u" ] && [ "\$u" != dev ]; then usermod -u "\$(free_id passwd)" "\$u"; fi; \\
     g="\$(getent group $HOST_GID | cut -d: -f1)"; \\
-    if [ -n "\$g" ] && [ "\$g" != dev ]; then groupdel "\$g"; fi; \\
+    if [ -n "\$g" ] && [ "\$g" != dev ]; then groupmod -g "\$(free_id group)" "\$g"; fi; \\
     groupmod -g $HOST_GID dev; \\
     usermod -u $HOST_UID -g $HOST_GID dev; \\
     find /home/dev /workspace -xdev \( -uid $DEV_UID -o -gid $DEV_GID \) -exec chown -h $HOST_UID:$HOST_GID {} +
@@ -565,6 +606,9 @@ fi
 # resets everything outside ~/.claude, ~/.cc-rc and ~/.claude.json every boot.
 STATE_DIR="$STATE_ROOT/$CONTAINER"
 mkdir -p "$STATE_DIR"
+# Recorded for --purge, which may run after --stop removed the container, and
+# without the --volume or --repo this run derived the volume name from.
+printf '%s\n' "$VOLUME" > "$STATE_DIR/volume"
 cat > "$STATE_DIR/gitconfig" <<GITCONFIG
 [user]
 	name = $GIT_NAME
