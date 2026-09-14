@@ -108,7 +108,10 @@ Docker has no per-container uid mapping, so the image's `dev` user (uid 1001) us
 differs from yours, and the script offers to chown `--code-dir` to it.
 `--match-host-uid` avoids that: it builds a derived image (once per base image) with
 `dev` renumbered to your uid:gid, so the clone stays owned by you on the host.
-Rootless podman needs neither; the script maps your uid with `--userns=keep-id`.
+Rootless podman needs neither: the script maps your uid onto `dev` with `--userns=keep-id`
+(on podman < 4.3, together with `--match-host-uid`). Rootless Docker is not supported: it
+has no keep-id, so the agent could only write a code dir that belongs to a host subuid,
+and the script stops rather than hand yours over.
 
 Differences from the pod, all deliberate: no squid (local egress is unrestricted, no
 `HTTP(S)_PROXY`, git+ssh goes straight to github.com), your own SSH key instead of the

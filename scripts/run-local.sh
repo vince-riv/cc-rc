@@ -224,6 +224,10 @@ github_repo_from_url() {
 
 lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 
+host_uid_of() {
+  stat -c %u "$1" 2>/dev/null || stat -f %u "$1" 2>/dev/null || echo -1
+}
+
 # Sets REPO from the git repo in the current directory: the current branch's
 # upstream remote first, then origin, then the only github.com remote if there
 # is exactly one. On failure, leaves the reason in DETECT_WHY for the error
@@ -287,6 +291,24 @@ fi
 [ -n "$ENGINE" ] || die "neither docker nor podman is on PATH - install one, or pass --engine"
 command -v "$ENGINE" >/dev/null 2>&1 || die "engine '$ENGINE' is not on PATH"
 "$ENGINE" info >/dev/null 2>&1 || die "'$ENGINE info' failed - is the engine running (and are you in its group)?"
+
+# Rootless engines map your host uid to container root, and container uids to
+# host subuids. That changes who can write a bind-mounted code dir - see the
+# rootless checks under "validate run inputs". Docker's security options are
+# captured before matching: grep -q under pipefail can fail a pipeline that
+# did match, by closing the pipe on docker early.
+ROOTLESS_PODMAN=0
+ROOTLESS_DOCKER=0
+if [ "$(basename "$ENGINE")" = "podman" ]; then
+  if [ "$("$ENGINE" info --format '{{.Host.Security.Rootless}}' 2>/dev/null || echo false)" = "true" ]; then
+    ROOTLESS_PODMAN=1
+  fi
+else
+  security_opts="$("$ENGINE" info --format '{{json .SecurityOptions}}' 2>/dev/null || true)"
+  case "$security_opts" in
+    *name=rootless*) ROOTLESS_DOCKER=1 ;;
+  esac
+fi
 
 # --- names ------------------------------------------------------------------
 
@@ -423,6 +445,26 @@ if [ -d "$CODE_DIR/repo/.git" ] && command -v git >/dev/null 2>&1; then
     die "$CODE_DIR/repo is already a clone of $existing_repo, not $REPO - use another --code-dir"
   fi
 fi
+
+# The rootless checks run here, before the pull, the probes and any
+# --match-host-uid build: nothing they read changes after this point, and a
+# user they stop should not wait through a build first.
+#
+# Rootless Docker maps your uid to container root while the agent runs as dev,
+# so dev can only write the code dir once it belongs to a host subuid - which
+# takes it away from you. Docker has no keep-id to map you onto dev, and
+# --match-host-uid cannot help either (dev would have to be container root).
+if [ "$ROOTLESS_DOCKER" -eq 1 ] && [ "$CHOWN" != "no" ]; then
+  die "rootless Docker maps your uid to container root, but the agent runs as the image's dev user, so it cannot write $CODE_DIR unless the dir is handed to a host subuid you cannot write as. Use rootful Docker, or rootless podman (it maps your uid onto dev with --userns=keep-id) - or pass --no-chown to try anyway."
+fi
+
+# Rootless podman, with either keep-id form: the agent writes as you, so the
+# code dir must be yours on the host. No chown run from a container can get it
+# there - its ids land on host subuids - so this is a check with a way out,
+# never a chown.
+if [ "$ROOTLESS_PODMAN" -eq 1 ] && [ "$CHOWN" != "no" ] && [ "$(host_uid_of "$CODE_DIR")" != "$(id -u)" ]; then
+  die "$CODE_DIR is owned by uid $(host_uid_of "$CODE_DIR"), not by you (uid $(id -u)). Under rootless podman the agent writes as you, and a chown from inside a container would hand the dir to a host subuid. Fix the owner on the host - for a dir an earlier container left on a subuid: podman unshare chown -R 0:0 '$CODE_DIR' - or pass --no-chown to try anyway."
+fi
 SCRIPTS_DIR="$(cd "$SCRIPTS_DIR" && pwd)"
 
 GIT_NAME="${GIT_NAME:-$(git config --get user.name || true)}"
@@ -493,9 +535,7 @@ fi
 # to dev land on a host subuid that you cannot write as.
 USERNS=()
 KEEP_ID=0
-ROOTLESS_PODMAN=0
-if [ "$(basename "$ENGINE")" = "podman" ] && [ "$("$ENGINE" info --format '{{.Host.Security.Rootless}}' 2>/dev/null || echo false)" = "true" ]; then
-  ROOTLESS_PODMAN=1
+if [ "$ROOTLESS_PODMAN" -eq 1 ]; then
   if "$ENGINE" run --rm "--userns=keep-id:uid=$DEV_UID,gid=$DEV_GID" "$IMAGE" true >/dev/null 2>&1; then
     USERNS=("--userns=keep-id:uid=$DEV_UID,gid=$DEV_GID")
     KEEP_ID=1
@@ -506,11 +546,11 @@ if [ "$(basename "$ENGINE")" = "podman" ] && [ "$("$ENGINE" info --format '{{.Ho
       MATCH_HOST_UID=1
     fi
   else
-    # The uid probe above already started a plain container from $IMAGE, so
-    # an unpullable image or a broken engine got reported there, on its own
-    # terms. What fails here is --userns=keep-id - still, show podman's own
-    # error rather than guess at why.
-    die "podman starts $IMAGE, but not with --userns=keep-id: $(printf '%s' "$keep_id_err" | tail -n 3). Without keep-id, a chown would hand $CODE_DIR to a host subuid you cannot write as - use a podman with keep-id support, rootful podman, or docker."
+    # All this code knows is that --userns=keep-id failed, so the message says
+    # only that, with podman's own error attached. The image itself does
+    # start: the explicit pull and the "Checking which uid:gid" probe - a
+    # plain run, with no --userns - both succeeded before this point.
+    die "podman could not start $IMAGE with --userns=keep-id: $(printf '%s' "$keep_id_err" | tail -n 3). Without keep-id, a chown would hand $CODE_DIR to a host subuid you cannot write as - use a podman with keep-id support, rootful podman, or rootful Docker."
   fi
 fi
 
@@ -575,23 +615,14 @@ DOCKERFILE
   fi
 fi
 
-host_uid_of() {
-  stat -c %u "$1" 2>/dev/null || stat -f %u "$1" 2>/dev/null || echo -1
-}
-
-# Rootless podman, with either keep-id form: the agent writes as you, so the
-# code dir must be yours on the host. No chown run from a container can get it
-# there - its ids land on host subuids - so this is a check with a way out,
-# never a chown. Gated on rootlessness, not on which keep-id form got used.
-if [ "$ROOTLESS_PODMAN" -eq 1 ] && [ "$CHOWN" != "no" ] && [ "$(host_uid_of "$CODE_DIR")" != "$(id -u)" ]; then
-  die "$CODE_DIR is owned by uid $(host_uid_of "$CODE_DIR"), not by you (uid $(id -u)). Under rootless podman the agent writes as you, and a chown from inside a container would hand the dir to a host subuid. Fix the owner on the host - for a dir an earlier container left on a subuid: podman unshare chown -R 0:0 '$CODE_DIR' - or pass --no-chown to try anyway."
-fi
-
-# macOS engines translate ownership on bind mounts already, and rootless
-# podman was settled just above - in both cases there is nothing to chown.
+# macOS engines translate ownership on bind mounts already, and both rootless
+# engines got settled under "validate run inputs" - a chown from a rootless
+# container would only hand the code dir to a host subuid. In all of these
+# cases there is nothing to chown.
 needs_chown() {
   [ "$(uname -s)" = "Darwin" ] && return 1
   [ "$ROOTLESS_PODMAN" -eq 1 ] && return 1
+  [ "$ROOTLESS_DOCKER" -eq 1 ] && return 1
   [ "$(host_uid_of "$CODE_DIR")" != "$DEV_UID" ]
 }
 
