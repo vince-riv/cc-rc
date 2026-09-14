@@ -59,6 +59,10 @@
 #      its next automatic restart: the engine's restart policy never runs this
 #      script, so nothing checks the mounts. Only starting a stopped container
 #      through this script is guarded.
+#  10. Run through a symlink, SCRIPT_DIR is the symlink's dir, so the default
+#      --scripts-dir (SCRIPT_DIR/../charts/...) points at the wrong place. The
+#      run stops with a clear "is not a directory" error, and --scripts-dir
+#      works around it; resolving the link would fix it.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -933,8 +937,11 @@ echo "Container $CONTAINER is up. Repo is at $CODE_DIR/repo."
 # --repo would re-derive cc-rc-<slug>, which is wrong after a custom --name) and
 # the engine by --engine (a bare --stop could pick docker on a host that also
 # has podman). Shell-quoted, so a command copied from here still works when the
-# script's or the engine's path contains spaces.
-hint_self="$(printf '%q' "$0")"
+# script's or the engine's path contains spaces. The script itself by its
+# absolute path: $0 is whatever was typed - often ./scripts/run-local.sh - and
+# that stops working as soon as the user is in another directory. basename, not
+# a literal filename, so a renamed copy or a symlink still prints its own name.
+hint_self="$(printf '%q' "$SCRIPT_DIR/$(basename -- "$0")")"
 hint_engine="$(printf '%q' "$ENGINE")"
 hint_name="$(printf '%q' "$CONTAINER")"
 if [ "$FIRST_BOOT" -eq 1 ]; then
