@@ -22,6 +22,36 @@
 #   export GITHUB_TOKEN=ghp_...
 #   scripts/run-local.sh --repo myorg/myrepo --ssh-key ~/.ssh/id_ed25519 \
 #     --token-env GITHUB_TOKEN --code-dir ~/src/cc-rc-agent
+#
+# KNOWN GAPS - to fix once someone can test on a real host. Podman and rootless
+# engines are EXPERIMENTAL: only rootful Docker (Docker Desktop on WSL2) has run
+# a real agent. The other engine paths were exercised with shims standing in
+# for podman or a rootless dockerd, which prove this script's control flow,
+# not how those engines really behave. Code sites are marked "Gap N".
+#   1. Real podman is untested: both keep-id forms, the podman < 4.3 fallback
+#      (plain keep-id + --match-host-uid), detecting podman behind a `docker`
+#      command (podman-docker), and SELinux :z relabeling. Rootful podman
+#      takes the Docker-style chown path, also untested.
+#   2. The keep-id:uid=,gid= probe discards its output. If it fails for a
+#      reason other than missing support, the script silently falls back to
+#      plain keep-id + --match-host-uid - that still works, but hides the real
+#      error and costs a derived-image build.
+#   3. Rootless dockerd is untested. Detection relies on "name=rootless" in
+#      docker info's SecurityOptions.
+#   4. Docker Desktop for Linux is unverified. If its daemon reports
+#      name=rootless, the rootless-Docker stop blocks it, although its bind
+#      mounts may translate ownership (Docker Desktop on Windows/WSL2 does not
+#      report it). Fix idea: in that branch, probe whether dev can create a
+#      file in the code dir, and stop only if it cannot.
+#   5. macOS is untested. Ownership checks are skipped on Darwin, on the
+#      assumption that its engines (Docker Desktop, podman machine) translate
+#      bind-mount ownership.
+#   6. --match-host-uid images pile up - one per base image ID, uid:gid and
+#      recipe - and nothing removes old ones.
+#   7. In a derived image, a dozen ~/.nvm symlinks can keep the old gid (an
+#      lchown quirk seen on Docker Desktop/overlayfs). Harmless; see the recipe.
+#   8. SELinux :z relabeling is only applied for podman. Rootful Docker on an
+#      SELinux-enforcing host gets no relabel and will likely hit mount denials.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -100,7 +130,9 @@ Required (for the default "run" action):
 
 Options:
   -i, --image REF          Image (default: $IMAGE)
-  -e, --engine NAME        docker or podman (default: first one found)
+  -e, --engine NAME        docker or podman (default: first one found).
+                           Podman and rootless engines are experimental - see
+                           KNOWN GAPS at the top of this script
   -n, --name NAME          Container name (default: cc-rc-<org>-<repo>)
       --volume NAME        Home volume name (default: cc-rc-home-<org>-<repo>)
       --scripts-dir DIR    Orchestration scripts to mount at /opt/cc-rc/scripts
@@ -292,17 +324,24 @@ fi
 command -v "$ENGINE" >/dev/null 2>&1 || die "engine '$ENGINE' is not on PATH"
 "$ENGINE" info >/dev/null 2>&1 || die "'$ENGINE info' failed - is the engine running (and are you in its group)?"
 
+# Which engine this really is, asked of the engine rather than read from its
+# command name: Fedora/RHEL's podman-docker package installs a `docker` that
+# runs podman, and the search above tries `docker` first. podman's info has
+# .Host.Security.Rootless and Docker's has no .Host at all, so that single
+# template both identifies podman and says whether it runs rootless.
+#
 # Rootless engines map your host uid to container root, and container uids to
 # host subuids. That changes who can write a bind-mounted code dir - see the
 # rootless checks under "validate run inputs". Docker's security options are
 # captured before matching: grep -q under pipefail can fail a pipeline that
-# did match, by closing the pipe on docker early.
+# did match, by closing the pipe on docker early. (Gaps 1, 3 and 4.)
+ENGINE_IS_PODMAN=0
 ROOTLESS_PODMAN=0
 ROOTLESS_DOCKER=0
-if [ "$(basename "$ENGINE")" = "podman" ]; then
-  if [ "$("$ENGINE" info --format '{{.Host.Security.Rootless}}' 2>/dev/null || echo false)" = "true" ]; then
-    ROOTLESS_PODMAN=1
-  fi
+if podman_rootless="$("$ENGINE" info --format '{{.Host.Security.Rootless}}' 2>/dev/null)"; then
+  ENGINE_IS_PODMAN=1
+  [ "$podman_rootless" != "true" ] || ROOTLESS_PODMAN=1
+  echo "Note: podman support is experimental - see KNOWN GAPS at the top of $0." >&2
 else
   security_opts="$("$ENGINE" info --format '{{json .SecurityOptions}}' 2>/dev/null || true)"
   case "$security_opts" in
@@ -454,6 +493,8 @@ fi
 # so dev can only write the code dir once it belongs to a host subuid - which
 # takes it away from you. Docker has no keep-id to map you onto dev, and
 # --match-host-uid cannot help either (dev would have to be container root).
+# (Gap 3: untested on a real rootless dockerd. Gap 4: may wrongly stop Docker
+# Desktop for Linux, if its daemon reports name=rootless.)
 if [ "$ROOTLESS_DOCKER" -eq 1 ] && [ "$CHOWN" != "no" ]; then
   die "rootless Docker maps your uid to container root, but the agent runs as the image's dev user, so it cannot write $CODE_DIR unless the dir is handed to a host subuid you cannot write as. Use rootful Docker, or rootless podman (it maps your uid onto dev with --userns=keep-id) - or pass --no-chown to try anyway."
 fi
@@ -461,8 +502,10 @@ fi
 # Rootless podman, with either keep-id form: the agent writes as you, so the
 # code dir must be yours on the host. No chown run from a container can get it
 # there - its ids land on host subuids - so this is a check with a way out,
-# never a chown.
-if [ "$ROOTLESS_PODMAN" -eq 1 ] && [ "$CHOWN" != "no" ] && [ "$(host_uid_of "$CODE_DIR")" != "$(id -u)" ]; then
+# never a chown. Skipped on macOS, like needs_chown: podman machine's bind
+# mounts cross the VM with ownership translated, and `podman unshare` runs in
+# that VM, where it cannot fix a macOS path. (Gap 5: untested on macOS.)
+if [ "$ROOTLESS_PODMAN" -eq 1 ] && [ "$(uname -s)" != "Darwin" ] && [ "$CHOWN" != "no" ] && [ "$(host_uid_of "$CODE_DIR")" != "$(id -u)" ]; then
   die "$CODE_DIR is owned by uid $(host_uid_of "$CODE_DIR"), not by you (uid $(id -u)). Under rootless podman the agent writes as you, and a chown from inside a container would hand the dir to a host subuid. Fix the owner on the host - for a dir an earlier container left on a subuid: podman unshare chown -R 0:0 '$CODE_DIR' - or pass --no-chown to try anyway."
 fi
 SCRIPTS_DIR="$(cd "$SCRIPTS_DIR" && pwd)"
@@ -519,7 +562,8 @@ esac
 # field (":ro,z") and read-write ones do not (":z").
 MOUNT_RO=":ro"
 MOUNT_RW=""
-if [ "$(basename "$ENGINE")" = "podman" ] && command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled 2>/dev/null; then
+# (Gap 1: untested. Gap 8: rootful Docker on an SELinux host gets no :z.)
+if [ "$ENGINE_IS_PODMAN" -eq 1 ] && command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled 2>/dev/null; then
   MOUNT_RO=":ro,z"
   MOUNT_RW=":z"
 fi
@@ -535,6 +579,8 @@ fi
 # to dev land on a host subuid that you cannot write as.
 USERNS=()
 KEEP_ID=0
+# (Gap 1: untested on real podman. Gap 2: this first probe's output is
+# discarded, so any failure falls through to the plain keep-id form.)
 if [ "$ROOTLESS_PODMAN" -eq 1 ]; then
   if "$ENGINE" run --rm "--userns=keep-id:uid=$DEV_UID,gid=$DEV_GID" "$IMAGE" true >/dev/null 2>&1; then
     USERNS=("--userns=keep-id:uid=$DEV_UID,gid=$DEV_GID")
@@ -583,7 +629,7 @@ if [ "$MATCH_HOST_UID" -eq 1 ]; then
     # of ~/.nvm's symlinks can keep the old gid - in testing (Docker Desktop,
     # overlayfs) lchown left their gid unchanged, even at runtime as root.
     # Harmless: symlink ownership grants nothing, and the home volume hides
-    # the image's /home/dev at runtime anyway.
+    # the image's /home/dev at runtime anyway. (Gap 7.)
     BUILD_CTX="$(mktemp -d)"
     cat > "$BUILD_CTX/Dockerfile" <<DOCKERFILE
 FROM $IMAGE
@@ -600,6 +646,8 @@ RUN set -eu; \\
 USER dev
 LABEL io.cc-rc.local.base-image="$IMAGE" io.cc-rc.local.base-id="sha256:$base_id"
 DOCKERFILE
+    # (Gap 6: every base image ID, uid:gid and recipe gets its own tag, and
+    # nothing removes the old ones.)
     recipe_hash="$({ sha256sum "$BUILD_CTX/Dockerfile" 2>/dev/null || shasum -a 256 "$BUILD_CTX/Dockerfile"; } | cut -c1-8)"
     DERIVED_IMAGE="localhost/cc-rc-local:${base_id:0:12}-u${HOST_UID}-g${HOST_GID}-${recipe_hash}"
     if "$ENGINE" image inspect "$DERIVED_IMAGE" >/dev/null 2>&1; then
@@ -618,7 +666,8 @@ fi
 # macOS engines translate ownership on bind mounts already, and both rootless
 # engines got settled under "validate run inputs" - a chown from a rootless
 # container would only hand the code dir to a host subuid. In all of these
-# cases there is nothing to chown.
+# cases there is nothing to chown. (Gap 5: macOS untested. Gap 1: rootful
+# podman takes the chown below, untested.)
 needs_chown() {
   [ "$(uname -s)" = "Darwin" ] && return 1
   [ "$ROOTLESS_PODMAN" -eq 1 ] && return 1

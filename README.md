@@ -113,6 +113,10 @@ Rootless podman needs neither: the script maps your uid onto `dev` with `--usern
 has no keep-id, so the agent could only write a code dir that belongs to a host subuid,
 and the script stops rather than hand yours over.
 
+**Podman and rootless engines are experimental.** Only rootful Docker has run a real agent;
+the podman and rootless paths were tested with engine shims only. The `KNOWN GAPS` comment
+at the top of `scripts/run-local.sh` lists what is unverified and what to fix next.
+
 Differences from the pod, all deliberate: no squid (local egress is unrestricted, no
 `HTTP(S)_PROXY`, git+ssh goes straight to github.com), your own SSH key instead of the
 chart's generated deploy key, and a host directory instead of the workspace PVC.
