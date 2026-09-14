@@ -321,6 +321,12 @@ if [ -z "$CONTAINER" ]; then
   [ "$ACTION" = "run" ] && die "--repo ORG/REPO (or CC_RC_REPO) is required, and none could be detected: $DETECT_WHY"
   die "--stop/--purge need --repo ORG/REPO or --name to know which container to act on, and no repo could be detected: $DETECT_WHY"
 fi
+# Docker's own container-name rule, [a-zA-Z0-9][a-zA-Z0-9_.-]+. It also keeps
+# $STATE_ROOT/$CONTAINER - written on every run, deleted by --purge - inside
+# $STATE_ROOT: no "/" can get in, and no name can be "." or "..".
+case "$CONTAINER" in
+  ?|[![:alnum:]]*|*[![:alnum:]_.-]*) die "--name '$CONTAINER' is not a valid container name ([a-zA-Z0-9][a-zA-Z0-9_.-]+)" ;;
+esac
 VOLUME="${VOLUME:-cc-rc-home-${CONTAINER#cc-rc-}}"
 
 container_exists() { "$ENGINE" container inspect "$CONTAINER" >/dev/null 2>&1; }
@@ -487,18 +493,24 @@ fi
 # to dev land on a host subuid that you cannot write as.
 USERNS=()
 KEEP_ID=0
+ROOTLESS_PODMAN=0
 if [ "$(basename "$ENGINE")" = "podman" ] && [ "$("$ENGINE" info --format '{{.Host.Security.Rootless}}' 2>/dev/null || echo false)" = "true" ]; then
+  ROOTLESS_PODMAN=1
   if "$ENGINE" run --rm "--userns=keep-id:uid=$DEV_UID,gid=$DEV_GID" "$IMAGE" true >/dev/null 2>&1; then
     USERNS=("--userns=keep-id:uid=$DEV_UID,gid=$DEV_GID")
     KEEP_ID=1
-  elif "$ENGINE" run --rm --userns=keep-id "$IMAGE" true >/dev/null 2>&1; then
+  elif keep_id_err="$("$ENGINE" run --rm --userns=keep-id "$IMAGE" true 2>&1 >/dev/null)"; then
     USERNS=("--userns=keep-id")
     if [ "$MATCH_HOST_UID" -eq 0 ]; then
       echo "Note: this podman has no --userns=keep-id:uid=,gid= - turning on --match-host-uid, so plain keep-id maps your uid onto dev."
       MATCH_HOST_UID=1
     fi
   else
-    die "this rootless podman supports no --userns=keep-id, and a chown would hand $CODE_DIR to a host subuid you cannot write as - use a newer podman, rootful podman, or docker"
+    # The uid probe above already started a plain container from $IMAGE, so
+    # an unpullable image or a broken engine got reported there, on its own
+    # terms. What fails here is --userns=keep-id - still, show podman's own
+    # error rather than guess at why.
+    die "podman starts $IMAGE, but not with --userns=keep-id: $(printf '%s' "$keep_id_err" | tail -n 3). Without keep-id, a chown would hand $CODE_DIR to a host subuid you cannot write as - use a podman with keep-id support, rootful podman, or docker."
   fi
 fi
 
@@ -567,11 +579,19 @@ host_uid_of() {
   stat -c %u "$1" 2>/dev/null || stat -f %u "$1" 2>/dev/null || echo -1
 }
 
-# macOS engines translate ownership on bind mounts already, and keep-id makes
-# it moot on rootless podman - in both cases there is nothing to fix.
+# Rootless podman, with either keep-id form: the agent writes as you, so the
+# code dir must be yours on the host. No chown run from a container can get it
+# there - its ids land on host subuids - so this is a check with a way out,
+# never a chown. Gated on rootlessness, not on which keep-id form got used.
+if [ "$ROOTLESS_PODMAN" -eq 1 ] && [ "$CHOWN" != "no" ] && [ "$(host_uid_of "$CODE_DIR")" != "$(id -u)" ]; then
+  die "$CODE_DIR is owned by uid $(host_uid_of "$CODE_DIR"), not by you (uid $(id -u)). Under rootless podman the agent writes as you, and a chown from inside a container would hand the dir to a host subuid. Fix the owner on the host - for a dir an earlier container left on a subuid: podman unshare chown -R 0:0 '$CODE_DIR' - or pass --no-chown to try anyway."
+fi
+
+# macOS engines translate ownership on bind mounts already, and rootless
+# podman was settled just above - in both cases there is nothing to chown.
 needs_chown() {
   [ "$(uname -s)" = "Darwin" ] && return 1
-  [ "$KEEP_ID" -eq 1 ] && return 1
+  [ "$ROOTLESS_PODMAN" -eq 1 ] && return 1
   [ "$(host_uid_of "$CODE_DIR")" != "$DEV_UID" ]
 }
 
