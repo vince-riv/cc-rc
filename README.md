@@ -94,6 +94,16 @@ lives in a named volume, so claude's login survives `--recreate`; `--stop` remov
 container, `--purge` removes the volume too. `--help` lists the rest (`--engine`,
 `--image`, `--permission-mode`, `--spawn`, `--capacity`, `--attach`, ...).
 
+Every option except `--stop`, `--purge` and `--recreate` also reads a `CC_RC_*` env var
+named after it (`--ssh-key` → `CC_RC_SSH_KEY`, `--match-host-uid` → `CC_RC_MATCH_HOST_UID=1`);
+a flag on the command line wins. Without `--repo`, the script detects `ORG/REPO` from the
+git repo in the current directory: its branch's upstream remote, then `origin`, then its
+only github.com remote. So with the other options in env vars, running the script from
+inside a clone is enough. One `--code-dir` holds one clone: the script refuses to start an
+agent on a clone of a different repo. For several repos, set `--base-code-dir DIR`
+(`CC_RC_BASE_CODE_DIR`) instead: each agent then gets `DIR/<org>/<repo>` (in lower case)
+as its code dir. An explicit `--code-dir` wins when both are set.
+
 Docker has no per-container uid mapping, so the image's `dev` user (uid 1001) usually
 differs from yours, and the script offers to chown `--code-dir` to it.
 `--match-host-uid` avoids that: it builds a derived image (once per base image) with

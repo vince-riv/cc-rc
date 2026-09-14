@@ -26,33 +26,53 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+die() { echo "$0: $*" >&2; exit 1; }
+
+# Every option except the one-shot actions (--stop, --purge, --recreate,
+# --help) also reads a CC_RC_* env var: the flag's name in upper case, with
+# "-" as "_". A flag on the command line always wins over its env var.
+#
+# env_bool OUT_VAR ENV_VAR DEFAULT - for on/off options. Anything but
+# 1/true/yes/on or 0/false/no/off is an error, not a silent "off".
+env_bool() {
+  local env_name="$2" raw
+  raw="${!env_name:-}"
+  [ -n "$raw" ] || raw="$3"
+  case "$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|on) printf -v "$1" '%s' 1 ;;
+    0|false|no|off) printf -v "$1" '%s' 0 ;;
+    *) die "$env_name must be 1/true/yes/on or 0/false/no/off, got: '$raw'" ;;
+  esac
+}
+
 IMAGE="${CC_RC_IMAGE:-ghcr.io/vince-riv/cc-rc:latest}"
 ENGINE="${CC_RC_ENGINE:-}"
 SCRIPTS_DIR="${CC_RC_SCRIPTS_DIR:-$SCRIPT_DIR/../charts/cc-rc/files/scripts}"
 STATE_ROOT="${XDG_STATE_HOME:-$HOME/.local/state}/cc-rc"
 
-REPO=""
-SSH_KEY=""
-TOKEN_ENV=""
-CODE_DIR=""
-CONTAINER=""
-VOLUME=""
-GIT_NAME=""
-GIT_EMAIL=""
-RESTART="unless-stopped"
+REPO="${CC_RC_REPO:-}"
+SSH_KEY="${CC_RC_SSH_KEY:-}"
+TOKEN_ENV="${CC_RC_TOKEN_ENV:-}"
+CODE_DIR="${CC_RC_CODE_DIR:-}"
+BASE_CODE_DIR="${CC_RC_BASE_CODE_DIR:-}"
+CONTAINER="${CC_RC_NAME:-}"
+VOLUME="${CC_RC_VOLUME:-}"
+GIT_NAME="${CC_RC_GIT_NAME:-}"
+GIT_EMAIL="${CC_RC_GIT_EMAIL:-}"
+RESTART="${CC_RC_RESTART:-unless-stopped}"
+CHOWN="${CC_RC_CHOWN:-auto}"
+env_bool PULL CC_RC_PULL 0
+env_bool ATTACH CC_RC_ATTACH 0
+env_bool FOLLOW CC_RC_FOLLOW 0
+env_bool MATCH_HOST_UID CC_RC_MATCH_HOST_UID 0
 ACTION="run"
 RECREATE=0
-ATTACH=0
-FOLLOW=0
-PULL=0
-CHOWN="auto"
-MATCH_HOST_UID=0
 
 # Defaults mirror charts/cc-rc/values.yaml's remoteControl block.
-RC_NAME=""
-RC_PERMISSION_MODE="bypassPermissions"
-RC_SPAWN="worktree"
-RC_CAPACITY="8"
+RC_NAME="${CC_RC_RC_NAME:-}"
+RC_PERMISSION_MODE="${CC_RC_PERMISSION_MODE:-bypassPermissions}"
+RC_SPAWN="${CC_RC_SPAWN:-worktree}"
+RC_CAPACITY="${CC_RC_CAPACITY:-8}"
 RC_UNHEALTHY_TIMEOUT="45"
 RC_FIRST_BOOT_TIMEOUT="900"
 RC_WORKTREE_MAX_AGE_DAYS="10"
@@ -60,15 +80,23 @@ STOP_TIMEOUT="60"
 
 usage() {
   cat <<USAGE
-Usage: $0 --repo ORG/REPO --ssh-key PATH --token-env VAR --code-dir DIR [options]
+Usage: $0 [--repo ORG/REPO] --ssh-key PATH --token-env VAR
+         (--code-dir DIR | --base-code-dir DIR) [options]
 
 Required (for the default "run" action):
-  -r, --repo ORG/REPO      GitHub repository to clone into <code-dir>/repo
   -k, --ssh-key PATH       Private SSH key registered with GitHub (read-only)
   -t, --token-env VAR      Name of the env var holding the GitHub PAT. Its
                            value becomes GH_TOKEN inside the container.
   -d, --code-dir DIR       Host directory mounted at /workspace (created if
-                           missing). The repo is cloned to DIR/repo.
+                           missing). The repo is cloned to DIR/repo; one
+                           DIR holds a clone of one repo only.
+      --base-code-dir DIR  Instead of --code-dir: use DIR/<org>/<repo> (in
+                           lower case), one code dir per repo under DIR. An
+                           explicit --code-dir wins when both are set.
+  -r, --repo ORG/REPO      GitHub repository to clone. Default: detected from
+                           the git repo in the current directory - its
+                           branch's upstream remote, then origin, then its
+                           only github.com remote
 
 Options:
   -i, --image REF          Image (default: $IMAGE)
@@ -99,11 +127,23 @@ Options:
       --purge              --stop, and also delete the home volume
   -h, --help               This help
 
-Only --repo (or --name) is needed for --stop/--purge.
+--stop/--purge need only --repo or --name, or neither inside a clone of the repo.
+
+Environment - every option except --stop, --purge, --recreate and --help also
+reads CC_RC_<OPTION> (upper case, "-" as "_"); a flag on the command line wins:
+  CC_RC_REPO           CC_RC_SSH_KEY        CC_RC_TOKEN_ENV
+  CC_RC_CODE_DIR       CC_RC_BASE_CODE_DIR  CC_RC_IMAGE
+  CC_RC_ENGINE         CC_RC_NAME           CC_RC_VOLUME
+  CC_RC_SCRIPTS_DIR    CC_RC_GIT_NAME       CC_RC_GIT_EMAIL
+  CC_RC_RC_NAME        CC_RC_SPAWN          CC_RC_CAPACITY
+  CC_RC_RESTART        CC_RC_PERMISSION_MODE
+  CC_RC_CHOWN          auto, yes (as --chown) or no (as --no-chown)
+  CC_RC_PULL  CC_RC_ATTACH  CC_RC_FOLLOW  CC_RC_MATCH_HOST_UID
+                       1/true/yes/on or 0/false/no/off
+A leading ~/ in a path (CC_RC_SSH_KEY, CC_RC_CODE_DIR, CC_RC_BASE_CODE_DIR,
+CC_RC_SCRIPTS_DIR) is expanded.
 USAGE
 }
-
-die() { echo "$0: $*" >&2; exit 1; }
 
 # Temp dirs this script creates, removed on any exit - including a die().
 KEY_STAGE=""
@@ -127,6 +167,7 @@ while [ $# -gt 0 ]; do
     -k|--ssh-key) SSH_KEY="$(val "$1" "${2:-}")"; shift 2 ;;
     -t|--token-env) TOKEN_ENV="$(val "$1" "${2:-}")"; shift 2 ;;
     -d|--code-dir) CODE_DIR="$(val "$1" "${2:-}")"; shift 2 ;;
+    --base-code-dir) BASE_CODE_DIR="$(val "$1" "${2:-}")"; shift 2 ;;
     -i|--image) IMAGE="$(val "$1" "${2:-}")"; shift 2 ;;
     -e|--engine) ENGINE="$(val "$1" "${2:-}")"; shift 2 ;;
     -n|--name) CONTAINER="$(val "$1" "${2:-}")"; shift 2 ;;
@@ -153,6 +194,89 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+case "$CHOWN" in
+  auto|yes|no) ;;
+  *) die "CC_RC_CHOWN must be auto, yes or no, got: '$CHOWN'" ;;
+esac
+
+# A value from an env var (or a quoted flag) can still hold a literal ~ that no
+# shell expanded, e.g. one loaded from a .env file.
+for path_var in SSH_KEY CODE_DIR BASE_CODE_DIR SCRIPTS_DIR; do
+  path_val="${!path_var}"
+  case "$path_val" in
+    "~") printf -v "$path_var" '%s' "$HOME" ;;
+    "~/"*) printf -v "$path_var" '%s' "$HOME/${path_val#"~/"}" ;;
+  esac
+done
+
+# --- repo -------------------------------------------------------------------
+
+# Prints ORG/REPO for a github.com remote URL - scp-style (git@github.com:o/r),
+# ssh://, https:// or git://, with or without .git, a user, or a port (as in
+# ssh://git@ssh.github.com:443/o/r) - and nothing for any other URL. An ssh
+# config Host alias hides the real host, so it cannot be recognized.
+github_repo_from_url() {
+  printf '%s\n' "${1%/}" | sed -nE \
+    -e 's#^(ssh|https?|git)://([^@/]+@)?(ssh\.)?github\.com(:[0-9]+)?/([^/]+)/([^/]+)$#\5/\6#p' \
+    -e 's#^([^@/:]+@)?(ssh\.)?github\.com:([^/]+)/([^/]+)$#\3/\4#p' \
+    | sed -e 's#\.git$##'
+}
+
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+# Sets REPO from the git repo in the current directory: the current branch's
+# upstream remote first, then origin, then the only github.com remote if there
+# is exactly one. On failure, leaves the reason in DETECT_WHY for the error
+# that follows. Never prints a remote's URL - an https one can embed a token.
+DETECT_WHY="no detection was attempted"
+detect_repo() {
+  local branch="" upstream="" remote="" parsed="" only="" only_remote="" count=0
+  if ! command -v git >/dev/null 2>&1; then
+    DETECT_WHY="git is not installed"
+    return 1
+  fi
+  if ! git rev-parse --git-dir >/dev/null 2>&1; then
+    DETECT_WHY="$PWD is not inside a git repository"
+    return 1
+  fi
+  branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+  [ -z "$branch" ] || upstream="$(git config --get "branch.$branch.remote" 2>/dev/null || true)"
+  # "." is git's name for a branch that tracks another local branch.
+  [ "$upstream" != "." ] || upstream=""
+  for remote in ${upstream:+"$upstream"} origin; do
+    parsed="$(github_repo_from_url "$(git remote get-url "$remote" 2>/dev/null || true)")"
+    if [ -n "$parsed" ]; then
+      REPO="$parsed"
+      echo "No --repo given - using $REPO, from remote '$remote' of the git repo in $PWD."
+      return 0
+    fi
+  done
+  while IFS= read -r remote; do
+    parsed="$(github_repo_from_url "$(git remote get-url "$remote" 2>/dev/null || true)")"
+    [ -n "$parsed" ] || continue
+    count=$((count + 1))
+    only="$parsed"
+    only_remote="$remote"
+  done < <(git remote)
+  if [ "$count" -eq 1 ]; then
+    REPO="$only"
+    echo "No --repo given - using $REPO, from remote '$only_remote' of the git repo in $PWD."
+    return 0
+  fi
+  if [ "$count" -eq 0 ]; then
+    DETECT_WHY="the git repo in $PWD has no github.com remote"
+  else
+    DETECT_WHY="the git repo in $PWD has $count github.com remotes, and neither its branch's upstream nor origin is one of them"
+  fi
+  return 1
+}
+
+# Needed for "run" even with --name, since the clone needs a repo; for --stop
+# and --purge only when no --name says which container to act on.
+if [ -z "$REPO" ] && { [ "$ACTION" = "run" ] || [ -z "$CONTAINER" ]; }; then
+  detect_repo || true
+fi
+
 # --- engine -----------------------------------------------------------------
 
 if [ -z "$ENGINE" ]; then
@@ -175,6 +299,13 @@ if [ -n "$REPO" ]; then
     *) die "--repo must be ORG/REPO, got: $REPO" ;;
   esac
   [ -n "$ORG" ] && [ -n "$NAME_PART" ] || die "--repo must be ORG/REPO, got: $REPO"
+  # GitHub's own character set. Also what keeps --base-code-dir's
+  # DIR/<org>/<repo> inside DIR - an org or repo of ".." would escape it.
+  for repo_part in "$ORG" "$NAME_PART"; do
+    case "$repo_part" in
+      .|..|*[![:alnum:]._-]*) die "--repo '$REPO' is not a valid GitHub ORG/REPO" ;;
+    esac
+  done
   # Same slug rules as the chart's cc-rc.repoSlug helper, so a local container
   # is named after its repo the way its StatefulSet would be.
   SLUG="$(printf '%s-%s' "$ORG" "$NAME_PART" | tr '[:upper:]' '[:lower:]' | sed -e 's/[^a-z0-9-][^a-z0-9-]*/-/g' -e 's/^-*//' -e 's/-*$//' | cut -c1-40 | sed -e 's/-*$//')"
@@ -183,8 +314,8 @@ if [ -n "$REPO" ]; then
   VOLUME="${VOLUME:-cc-rc-home-$SLUG}"
 fi
 if [ -z "$CONTAINER" ]; then
-  [ "$ACTION" = "run" ] && die "--repo ORG/REPO is required"
-  die "--stop/--purge need --repo ORG/REPO (or --name) to know which container to act on"
+  [ "$ACTION" = "run" ] && die "--repo ORG/REPO (or CC_RC_REPO) is required, and none could be detected: $DETECT_WHY"
+  die "--stop/--purge need --repo ORG/REPO or --name to know which container to act on, and no repo could be detected: $DETECT_WHY"
 fi
 VOLUME="${VOLUME:-cc-rc-home-${CONTAINER#cc-rc-}}"
 
@@ -216,10 +347,22 @@ fi
 
 # --- validate run inputs ----------------------------------------------------
 
-[ -n "$REPO" ] || die "--repo ORG/REPO is required"
-[ -n "$SSH_KEY" ] || die "--ssh-key PATH is required"
-[ -n "$TOKEN_ENV" ] || die "--token-env VAR is required"
-[ -n "$CODE_DIR" ] || die "--code-dir DIR is required"
+[ -n "$REPO" ] || die "--repo ORG/REPO (or CC_RC_REPO) is required, and none could be detected: $DETECT_WHY"
+[ -n "$SSH_KEY" ] || die "--ssh-key PATH (or CC_RC_SSH_KEY) is required"
+[ -n "$TOKEN_ENV" ] || die "--token-env VAR (or CC_RC_TOKEN_ENV) is required"
+# --base-code-dir: one code dir per repo under a shared base, so it can be set
+# once (CC_RC_BASE_CODE_DIR) for every repo without ever tripping the
+# one-clone-per-code-dir guard below. Lower case, because GitHub names ignore
+# case - Org/Repo and org/repo must not end up as two separate clones.
+if [ -n "$BASE_CODE_DIR" ]; then
+  if [ -z "$CODE_DIR" ]; then
+    CODE_DIR="${BASE_CODE_DIR%/}/$(lower "$ORG")/$(lower "$NAME_PART")"
+    echo "Using code dir $CODE_DIR (from the base code dir)."
+  else
+    echo "Note: a code dir and a base code dir are both set - using the code dir, $CODE_DIR."
+  fi
+fi
+[ -n "$CODE_DIR" ] || die "--code-dir DIR or --base-code-dir DIR (or CC_RC_CODE_DIR / CC_RC_BASE_CODE_DIR) is required"
 [ -f "$SSH_KEY" ] || die "--ssh-key '$SSH_KEY' is not a file"
 [ -r "$SSH_KEY" ] || die "--ssh-key '$SSH_KEY' is not readable"
 [ -d "$SCRIPTS_DIR" ] || die "--scripts-dir '$SCRIPTS_DIR' is not a directory"
@@ -236,6 +379,17 @@ export GH_TOKEN="$TOKEN"
 
 mkdir -p "$CODE_DIR"
 CODE_DIR="$(cd "$CODE_DIR" && pwd)"
+
+# clone-repo.sh skips any existing clone, so a --code-dir shared between repos
+# (easy once CC_RC_CODE_DIR is set for all of them) would silently run this
+# agent on another repo's clone. safe.directory: the clone may belong to the
+# image's dev uid rather than to you.
+if [ -d "$CODE_DIR/repo/.git" ] && command -v git >/dev/null 2>&1; then
+  existing_repo="$(github_repo_from_url "$(git -c safe.directory='*' -C "$CODE_DIR/repo" remote get-url origin 2>/dev/null || true)")"
+  if [ -n "$existing_repo" ] && [ "$(lower "$existing_repo")" != "$(lower "$REPO")" ]; then
+    die "$CODE_DIR/repo is already a clone of $existing_repo, not $REPO - use another --code-dir"
+  fi
+fi
 SCRIPTS_DIR="$(cd "$SCRIPTS_DIR" && pwd)"
 
 GIT_NAME="${GIT_NAME:-$(git config --get user.name || true)}"
