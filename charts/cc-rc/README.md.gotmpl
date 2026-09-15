@@ -49,6 +49,7 @@ repo, each behind a locked-down [Squid](https://www.squid-cache.org/) egress pro
   the Squid `Service` and to cluster DNS — git+ssh needs no separate rule, since it
   tunnels through that same squid egress (see "SSH deploy key" below). Never applied to
   the SSH-key `Job`'s pods either, which — like squid's — keep unrestricted egress.
+  `networkPolicy.extraEgress` appends extra rules (see "Configuring egress" below).
 - A `ConfigMap` rendering `~/.gitconfig` and `~/.gitignore_global` for the `dev` user,
   mounted read-only into every agent.
 - A `ConfigMap` holding the `seed-home`/`seed-ssh`/`clone-repo`/`create-ssh-key`/
@@ -520,6 +521,23 @@ Setting `proxy.allowList` switches to strict mode: only those domains/CIDRs (por
 80/443) are reachable — `github.com:22` is still carved out in this mode too (every
 agent needs it for its own deploy key; see "SSH deploy key" above), unless `github.com`
 is itself in `proxy.denyList`, which always wins over both.
+
+For traffic that doesn't go through squid — in-cluster `Service`s (in `NO_PROXY`) or
+protocols that ignore `HTTP(S)_PROXY` — add rules to `networkPolicy.extraEgress`. This is
+an advanced option: each item is a standard `NetworkPolicy` egress rule, appended
+verbatim to the agent `NetworkPolicy` without validation:
+
+```yaml
+networkPolicy:
+  extraEgress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+```
 
 Squid's access/cache logs go to `kubectl logs`/`stern` on the squid `Deployment` pod —
 `squid.conf` sends them to `/dev/stdout`, and `PEBBLE_VERBOSE=1` makes the base image's

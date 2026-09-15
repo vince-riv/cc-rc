@@ -55,4 +55,11 @@ spec:
     # (already allowed above, port 3128) via ProxyCommand/CONNECT - see
     # files/scripts/seed-ssh.sh's ~/.ssh/config and squid.conf's
     # github_ssh/port_22 ACL.
+    {{- with .Values.networkPolicy.extraEgress }}
+    {{- if not (kindIs "slice" .) }}
+    {{- fail "networkPolicy.extraEgress must be a list of NetworkPolicy egress rules" }}
+    {{- end }}
+    # networkPolicy.extraEgress, appended verbatim.
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 {{- end }}

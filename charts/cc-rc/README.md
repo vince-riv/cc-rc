@@ -46,6 +46,7 @@ repo, each behind a locked-down [Squid](https://www.squid-cache.org/) egress pro
   the Squid `Service` and to cluster DNS — git+ssh needs no separate rule, since it
   tunnels through that same squid egress (see "SSH deploy key" below). Never applied to
   the SSH-key `Job`'s pods either, which — like squid's — keep unrestricted egress.
+  `networkPolicy.extraEgress` appends extra rules (see "Configuring egress" below).
 - A `ConfigMap` rendering `~/.gitconfig` and `~/.gitignore_global` for the `dev` user,
   mounted read-only into every agent.
 - A `ConfigMap` holding the `seed-home`/`seed-ssh`/`clone-repo`/`create-ssh-key`/
@@ -518,6 +519,23 @@ Setting `proxy.allowList` switches to strict mode: only those domains/CIDRs (por
 agent needs it for its own deploy key; see "SSH deploy key" above), unless `github.com`
 is itself in `proxy.denyList`, which always wins over both.
 
+For traffic that doesn't go through squid — in-cluster `Service`s (in `NO_PROXY`) or
+protocols that ignore `HTTP(S)_PROXY` — add rules to `networkPolicy.extraEgress`. This is
+an advanced option: each item is a standard `NetworkPolicy` egress rule, appended
+verbatim to the agent `NetworkPolicy` without validation:
+
+```yaml
+networkPolicy:
+  extraEgress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+```
+
 Squid's access/cache logs go to `kubectl logs`/`stern` on the squid `Deployment` pod —
 `squid.conf` sends them to `/dev/stdout`, and `PEBBLE_VERBOSE=1` makes the base image's
 Pebble entrypoint relay that to its own stdout (otherwise it's only visible via
@@ -549,9 +567,10 @@ Pebble entrypoint relay that to its own stdout (otherwise it's only visible via
 | github.tokens | object | `{}` | Map of org name -> GitHub PAT. Chart creates a Secret from this map (one key per org, keyed by org name) if set. Fine for quick testing, but for anything long-lived prefer `existingSecret` plus `scripts/manage-github-tokens.sh`, which keeps tokens out of values.yaml/git entirely. |
 | image | object | `{"pullPolicy":"Always","repository":"ghcr.io/vince-riv/cc-rc","tag":"latest"}` | Image for the per-repo agent StatefulSets |
 | labels | object | `{}` | Extra labels added to every per-repo agent StatefulSet object (not its pods, not its headless Service). Merged on top of the chart's own labels. Override/extend per-repo via `repos[].labels`, which is merged per key over this default. Values are coerced to strings, so an unquoted `version: 3` is safe. The chart-owned label keys (`app.kubernetes.io/*`, `helm.sh/chart`, `cc-rc.io/org`, `cc-rc.io/repo`) are rejected at render time rather than silently ignored. |
-| networkPolicy | object | `{"dns":{"namespace":"kube-system","podSelector":{"k8s-app":"kube-dns"},"port":53},"enabled":true}` | NetworkPolicy that denies all egress from per-repo agent pods except to the squid proxy Service and to cluster DNS. Never applied to the squid Deployment's own pods, which keep unrestricted egress. |
+| networkPolicy | object | `{"dns":{"namespace":"kube-system","podSelector":{"k8s-app":"kube-dns"},"port":53},"enabled":true,"extraEgress":[]}` | NetworkPolicy that denies all egress from per-repo agent pods except to the squid proxy Service and to cluster DNS. Never applied to the squid Deployment's own pods, which keep unrestricted egress. |
 | networkPolicy.dns.namespace | string | `"kube-system"` | Namespace running the cluster's DNS resolver. |
 | networkPolicy.dns.podSelector | object | `{"k8s-app":"kube-dns"}` | Label selector matching the DNS resolver pods. Varies by distro/cluster (kubeadm/k3s/EKS default to k8s-app=kube-dns; some CoreDNS installs use k8s-app=coredns instead). |
+| networkPolicy.extraEgress | list | `[]` | Advanced: extra NetworkPolicy egress rules for agent pods, appended verbatim after the built-in DNS/squid/Anthropic rules. Each item is a standard `networking.k8s.io/v1` egress rule (`to`/`ports`) and is not validated by the chart. Agents still send HTTP(S) through squid unless the destination is in NO_PROXY (e.g. .svc/.cluster.local names), so these rules mainly matter for in-cluster Services and non-proxied protocols. |
 | nodeSelector | object | `{}` | Default nodeSelector for every per-repo agent StatefulSet. Override per-repo via `repos[].nodeSelector` (full replace, not merged with this default). |
 | podAnnotations | object | `{}` | Extra annotations added to every per-repo agent POD. Merged on top of the chart's own pod annotations. Override/extend per-repo via `repos[].podAnnotations`, which is merged per key over this default. Values are coerced to strings, so an unquoted `prometheus.io/scrape: true` is safe. `checksum/scripts` is chart-owned (it rolls the pods when a mounted script changes) and is rejected at render time. |
 | podFsGroup | int | `1001` | Group ID applied via pod securityContext.fsGroup so freshly-mounted PVCs are writable by the image's non-root `dev` user (created via `useradd -m`, uid/gid 1001). Changing this value re-chowns existing PVCs on their next pod mount (kubelet does this automatically; fsGroupChangePolicy is not set, so it defaults to "Always"). |

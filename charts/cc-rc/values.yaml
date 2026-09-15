@@ -490,3 +490,17 @@ networkPolicy:
     podSelector:
       k8s-app: kube-dns
     port: 53
+  # -- Advanced: extra NetworkPolicy egress rules for agent pods, appended verbatim
+  # after the built-in DNS/squid/Anthropic rules. Each item is a standard
+  # `networking.k8s.io/v1` egress rule (`to`/`ports`) and is not validated by the
+  # chart. Agents still send HTTP(S) through squid unless the destination is in
+  # NO_PROXY (e.g. .svc/.cluster.local names), so these rules mainly matter for
+  # in-cluster Services and non-proxied protocols.
+  extraEgress: []
+    # - to:
+    #     - namespaceSelector:
+    #         matchLabels:
+    #           kubernetes.io/metadata.name: postgres
+    #   ports:
+    #     - protocol: TCP
+    #       port: 5432

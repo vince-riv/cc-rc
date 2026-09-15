@@ -52,7 +52,8 @@ at least one `repos[]` entry (`org`/`repo`). Full reference in
   Idempotent (no-op once that `Secret` exists) and self-rolling-back (deletes the
   just-added GitHub key again if the `Secret` write fails).
 - **Per-repo `StatefulSet`** (replicas: 1) — `NetworkPolicy` permits egress only to Squid
-  + cluster DNS (git+ssh tunnels through squid too, no separate rule needed). PVCs:
+  + cluster DNS (git+ssh tunnels through squid too, no separate rule needed), plus any
+  `networkPolicy.extraEgress` rules, appended verbatim. PVCs:
   `/home/dev` (`storage.homeSize`) and `/workspace` (`storage.workspaceSize`).
   Orchestration scripts (`files/scripts/*.sh`) are ConfigMap-mounted, not baked into the
   image, so a custom `image.repository`/`tag` only needs to provide the underlying
