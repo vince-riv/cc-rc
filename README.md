@@ -41,8 +41,9 @@ at least one `repos[]` entry (`org`/`repo`). Full reference in
 
 - **Squid `Deployment`** — the only workload with unrestricted egress. `proxy.allowList`
   empty = open web on `proxy.allowedPortsWhenOpen`; non-empty = strict allow-list, ports
-  80/443 only. `proxy.denyList` and `proxy.defaultBlocked` (`cluster.local`, RFC1918)
-  always win. `github.com:22` (git+ssh) is always allowed, in both modes, tunneled
+  80/443 only. `proxy.denyList` and `proxy.defaultBlocked` (`.cluster.local`, RFC1918,
+  loopback, link-local/cloud metadata, CGNAT, IPv6 ULA) always win, except hosts listed in `proxy.defaultBlockedExceptions` skip
+  `defaultBlocked` (never `denyList`). `github.com:22` (git+ssh) is always allowed, in both modes, tunneled
   through squid via `CONNECT` — see the SSH deploy key Job below. Access/cache logs go
   to `kubectl logs`/stern.
 - **SSH deploy key `Job`** (pre-install/pre-upgrade hook) — generates one ED25519 key
