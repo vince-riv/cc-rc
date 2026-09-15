@@ -471,7 +471,7 @@ proxy:
   # that range, never a hostname resolving into it - exempt the hostname itself.
   # This does not make in-cluster Services reachable: .svc/.cluster.local names are
   # in agent pods' NO_PROXY, so that traffic skips squid and the agent NetworkPolicy
-  # drops it.
+  # drops it. Use networkPolicy.extraEgress to allow specific in-cluster destinations.
   defaultBlockedExceptions: []
     # - registry.corp.internal
     # - 10.20.30.40/32
@@ -490,3 +490,17 @@ networkPolicy:
     podSelector:
       k8s-app: kube-dns
     port: 53
+  # -- Advanced: extra NetworkPolicy egress rules for agent pods, appended verbatim
+  # after the built-in DNS/squid/Anthropic rules. Each item is a standard
+  # `networking.k8s.io/v1` egress rule (`to`/`ports`) and is not validated by the
+  # chart. Agents still send HTTP(S) through squid unless the destination is in
+  # NO_PROXY (e.g. .svc/.cluster.local names), so these rules mainly matter for
+  # in-cluster Services and non-proxied protocols.
+  extraEgress: []
+    # - to:
+    #     - namespaceSelector:
+    #         matchLabels:
+    #           kubernetes.io/metadata.name: postgres
+    #   ports:
+    #     - protocol: TCP
+    #       port: 5432
