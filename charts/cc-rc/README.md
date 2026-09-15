@@ -512,7 +512,8 @@ never a hostname that resolves into it — exempt the hostname itself.
 
 Exemptions don't make in-cluster `Service`s reachable: `.svc` and `.cluster.local` are
 in agent pods' `NO_PROXY`, so that traffic skips squid, and the agent `NetworkPolicy`
-drops it.
+drops it. Use `networkPolicy.extraEgress` (see below) to allow specific in-cluster
+destinations.
 
 Setting `proxy.allowList` switches to strict mode: only those domains/CIDRs (ports
 80/443) are reachable — `github.com:22` is still carved out in this mode too (every
@@ -581,7 +582,7 @@ Pebble entrypoint relay that to its own stdout (otherwise it's only visible via
 | proxy.allowedPortsWhenOpen | list | `[80,443,8080,8443,3000,5000,8000,9000]` | Ports permitted for any destination when allowList is EMPTY (open-web mode). Ignored in strict allow-list mode (only 80/443 are opened there). |
 | proxy.annotations | object | `{}` | Extra annotations added to the squid Deployment object (not its pods). Values are coerced to strings. The chart puts no annotations of its own on this object, so no key is reserved here. |
 | proxy.defaultBlocked | list | `[".cluster.local","192.168.0.0/16","10.0.0.0/8","172.16.0.0/12","0.0.0.0/8","127.0.0.0/8","169.254.0.0/16","100.64.0.0/10","::1/128","fc00::/7","fe80::/10"]` | Baked-in destinations that are blocked on top of denyList. Not intended to be overridden — these protect cluster-internal networks. To reach one specific host inside them, add it to defaultBlockedExceptions instead of editing this list. |
-| proxy.defaultBlockedExceptions | list | `[]` | Destinations exempted from defaultBlocked, for hosts agents legitimately need inside those ranges (e.g. an internal registry on 10.x). Same entry format as allowList; keep entries as narrow as possible. An exemption ONLY lifts defaultBlocked: denyList still wins, and in strict allow-list mode the destination must ALSO be in allowList. A domain exemption covers whatever address that name resolves to, so only list names whose DNS you trust. A CIDR exemption only covers requests for a raw IP in that range, never a hostname resolving into it - exempt the hostname itself. This does not make in-cluster Services reachable: .svc/.cluster.local names are in agent pods' NO_PROXY, so that traffic skips squid and the agent NetworkPolicy drops it. |
+| proxy.defaultBlockedExceptions | list | `[]` | Destinations exempted from defaultBlocked, for hosts agents legitimately need inside those ranges (e.g. an internal registry on 10.x). Same entry format as allowList; keep entries as narrow as possible. An exemption ONLY lifts defaultBlocked: denyList still wins, and in strict allow-list mode the destination must ALSO be in allowList. A domain exemption covers whatever address that name resolves to, so only list names whose DNS you trust. A CIDR exemption only covers requests for a raw IP in that range, never a hostname resolving into it - exempt the hostname itself. This does not make in-cluster Services reachable: .svc/.cluster.local names are in agent pods' NO_PROXY, so that traffic skips squid and the agent NetworkPolicy drops it. Use networkPolicy.extraEgress to allow specific in-cluster destinations. |
 | proxy.denyList | list | `[]` | Destinations that are always blocked, regardless of allow-list mode. Takes precedence over allowList and over the github.com:22 git+ssh carve-out. |
 | proxy.env | list | `[]` | Extra env vars added to the squid container, alongside the chart's own PEBBLE_VERBOSE. Same shape as a container's `env`; supports `valueFrom`. |
 | proxy.envFrom | list | `[]` | Extra envFrom added to the squid container. Same shape as a container's `envFrom`. |

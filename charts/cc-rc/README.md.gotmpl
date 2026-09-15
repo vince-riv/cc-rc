@@ -515,7 +515,8 @@ never a hostname that resolves into it — exempt the hostname itself.
 
 Exemptions don't make in-cluster `Service`s reachable: `.svc` and `.cluster.local` are
 in agent pods' `NO_PROXY`, so that traffic skips squid, and the agent `NetworkPolicy`
-drops it.
+drops it. Use `networkPolicy.extraEgress` (see below) to allow specific in-cluster
+destinations.
 
 Setting `proxy.allowList` switches to strict mode: only those domains/CIDRs (ports
 80/443) are reachable — `github.com:22` is still carved out in this mode too (every
