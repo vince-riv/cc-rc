@@ -1,3 +1,21 @@
+{{- $blockedDomains := list -}}
+{{- $blockedCidrs := list -}}
+{{- range .Values.proxy.defaultBlocked -}}
+  {{- if contains "/" . -}}
+    {{- $blockedCidrs = append $blockedCidrs . -}}
+  {{- else -}}
+    {{- $blockedDomains = append $blockedDomains . -}}
+  {{- end -}}
+{{- end -}}
+{{- $exceptDomains := list -}}
+{{- $exceptCidrs := list -}}
+{{- range .Values.proxy.defaultBlockedExceptions -}}
+  {{- if contains "/" . -}}
+    {{- $exceptCidrs = append $exceptCidrs . -}}
+  {{- else -}}
+    {{- $exceptDomains = append $exceptDomains . -}}
+  {{- end -}}
+{{- end -}}
 {{- $denyDomains := list -}}
 {{- $denyCidrs := list -}}
 {{- range .Values.proxy.denyList -}}
@@ -68,8 +86,9 @@ data:
     #
     # ACL precedence (evaluated top to bottom, first match wins):
     #   1. protocol/port sanity
-    #   2. baked-in defaultBlocked destinations — always denied
-    #   3. user-supplied denyList — always denied
+    #   2. baked-in defaultBlocked destinations — denied, unless the
+    #      destination is in defaultBlockedExceptions
+    #   3. user-supplied denyList — always denied, exceptions or not
     #   4. github.com:22 (git+ssh, see files/scripts/seed-ssh.sh's
     #      ~/.ssh/config - agents tunnel git+ssh through squid via
     #      ProxyCommand/CONNECT) — always allowed, in both modes, unless
@@ -81,15 +100,36 @@ data:
     http_access deny CONNECT !SSL_ports
     http_access deny !Safe_ports
 
-    # -- 2. baked-in defaultBlocked destinations, always denied --
-    acl default_blocked_domains dstdomain {{ range .Values.proxy.defaultBlocked }}{{ if not (contains "/" .) }}{{ . }} {{ end }}{{ end }}
-    acl default_blocked_cidrs dst {{ range .Values.proxy.defaultBlocked }}{{ if contains "/" . }}{{ . }} {{ end }}{{ end }}
-    http_access deny default_blocked_domains
-    http_access deny default_blocked_cidrs
+    # -- 2. baked-in defaultBlocked destinations, denied unless exempted --
+    # Each exemption ACL is negated onto BOTH deny lines, so a domain exemption
+    # also covers the private address that name resolves to, and a CIDR
+    # exemption also covers names (e.g. *.svc.cluster.local) resolving into it.
+    {{- $exempt := "" }}
+    {{- if $exceptDomains }}
+    # -n: match by requested name only - never reverse-DNS a raw-IP request
+    # into an exempted name.
+    acl default_blocked_except_domains dstdomain -n {{ $exceptDomains | join " " }}
+    {{- $exempt = printf "%s !default_blocked_except_domains" $exempt }}
+    {{- end }}
+    {{- if $exceptCidrs }}
+    acl default_blocked_except_cidrs dst {{ $exceptCidrs | join " " }}
+    {{- $exempt = printf "%s !default_blocked_except_cidrs" $exempt }}
+    {{- end }}
+    {{- if $blockedDomains }}
+    # -n: no reverse DNS of raw-IP requests. A slow PTR lookup otherwise stalls
+    # the first request to an IP for seconds, and private IPs are already
+    # caught by the CIDR deny line below.
+    acl default_blocked_domains dstdomain -n {{ $blockedDomains | join " " }}
+    http_access deny default_blocked_domains{{ $exempt }}
+    {{- end }}
+    {{- if $blockedCidrs }}
+    acl default_blocked_cidrs dst {{ $blockedCidrs | join " " }}
+    http_access deny default_blocked_cidrs{{ $exempt }}
+    {{- end }}
 
     # -- 3. user-supplied denyList, always denied --
     {{- if $denyDomains }}
-    acl user_deny_domains dstdomain {{ $denyDomains | join " " }}
+    acl user_deny_domains dstdomain -n {{ $denyDomains | join " " }}
     http_access deny user_deny_domains
     {{- end }}
     {{- if $denyCidrs }}
@@ -98,7 +138,10 @@ data:
     {{- end }}
 
     # -- 4. github.com:22 (git+ssh), always allowed --
-    acl github_ssh dstdomain github.com
+    # Every dstdomain ACL here uses -n: without it, squid matches a raw-IP
+    # request against the IP's reverse DNS name, which whoever owns that IP
+    # controls - e.g. a PTR of "github.com" would open that IP's port 22.
+    acl github_ssh dstdomain -n github.com
     acl port_22 port 22
     http_access allow github_ssh port_22
 
@@ -108,7 +151,7 @@ data:
     acl allowed_ports port 80
     acl allowed_ports port 443
     {{- if $allowDomains }}
-    acl allow_domains dstdomain {{ $allowDomains | join " " }}
+    acl allow_domains dstdomain -n {{ $allowDomains | join " " }}
     http_access allow allow_domains allowed_ports
     {{- end }}
     {{- if $allowCidrs }}

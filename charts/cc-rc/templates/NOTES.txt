@@ -12,7 +12,8 @@ Agent StatefulSets ({{ len .Values.repos }}):
 
 Squid is running in OPEN-WEB mode (proxy.allowList is empty): all destinations are
 reachable on the configured ports ({{ .Values.proxy.allowedPortsWhenOpen | join ", " }}),
-except proxy.denyList and the baked-in cluster-internal ranges.
+except proxy.denyList and the baked-in cluster-internal ranges (proxy.defaultBlocked,
+minus any proxy.defaultBlockedExceptions).
 {{- else }}
 
 Squid is running in STRICT ALLOW-LIST mode. Only these destinations (ports 80/443) are

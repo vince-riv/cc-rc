@@ -486,8 +486,27 @@ hard-coded, renaming an emitted label keeps this guard in step automatically.
 
 `proxy.allowList` empty (default) = open-web mode: any destination is reachable on
 `proxy.allowedPortsWhenOpen`, plus `github.com:22` for git+ssh, except `proxy.denyList`
-and the baked-in cluster-internal ranges (`cluster.local`, `192.168.0.0/16`,
-`10.0.0.0/8`, `172.16.0.0/12`).
+and the baked-in internal destinations in `proxy.defaultBlocked`: `.cluster.local`,
+RFC1918 (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), `0.0.0.0/8`, loopback
+(`127.0.0.0/8`, `::1/128`), link-local including the cloud metadata endpoint
+(`169.254.0.0/16`, `fe80::/10`), carrier-grade NAT (`100.64.0.0/10`) and IPv6
+unique-local (`fc00::/7`).
+
+To reach one specific host inside those ranges (an internal registry on 10.x, an
+in-cluster `Service`), list it in `proxy.defaultBlockedExceptions` rather than editing
+`proxy.defaultBlocked`. Exemptions are a hole in `defaultBlocked` only: `proxy.denyList`
+still wins over them, and in strict mode the host must also be in `proxy.allowList`:
+
+```yaml
+proxy:
+  allowList:
+    - registry.corp.internal
+  defaultBlockedExceptions:
+    - registry.corp.internal  # resolves to 10.20.30.40
+```
+
+A domain exemption covers whatever address that name resolves to, so only exempt names
+whose DNS you trust. A request to a raw IP only matches a CIDR exemption.
 
 Setting `proxy.allowList` switches to strict mode: only those domains/CIDRs (ports
 80/443) are reachable — `github.com:22` is still carved out in this mode too (every
@@ -532,12 +551,13 @@ Pebble entrypoint relay that to its own stdout (otherwise it's only visible via
 | podAnnotations | object | `{}` | Extra annotations added to every per-repo agent POD. Merged on top of the chart's own pod annotations. Override/extend per-repo via `repos[].podAnnotations`, which is merged per key over this default. Values are coerced to strings, so an unquoted `prometheus.io/scrape: true` is safe. `checksum/scripts` is chart-owned (it rolls the pods when a mounted script changes) and is rejected at render time. |
 | podFsGroup | int | `1001` | Group ID applied via pod securityContext.fsGroup so freshly-mounted PVCs are writable by the image's non-root `dev` user (created via `useradd -m`, uid/gid 1001). Changing this value re-chowns existing PVCs on their next pod mount (kubelet does this automatically; fsGroupChangePolicy is not set, so it defaults to "Always"). |
 | podLabels | object | `{}` | Extra labels added to every per-repo agent POD. Merged on top of the chart's own pod labels. Override/extend per-repo via `repos[].podLabels`, which is merged per key over this default. Values are coerced to strings. Setting a label here does not change the StatefulSet's (immutable) pod selector, which always uses the chart's own labels only; the chart-owned label keys are rejected at render time. |
-| proxy | object | `{"affinity":{},"allowList":[],"allowedPortsWhenOpen":[80,443,8080,8443,3000,5000,8000,9000],"annotations":{},"defaultBlocked":["cluster.local","192.168.0.0/16","10.0.0.0/8","172.16.0.0/12"],"denyList":[],"env":[],"envFrom":[],"gracefulShutdownSeconds":45,"image":{"pullPolicy":"Always","repository":"ubuntu/squid","tag":"7.2-26.04_edge"},"labels":{},"nodeSelector":{},"podAnnotations":{},"podDisruptionBudget":{"enabled":false,"minAvailable":1},"podLabels":{},"probes":{"quiet":true},"replicaCount":1,"resources":{},"revisionHistoryLimit":5,"service":{"port":3128,"type":"ClusterIP"},"startupWaitTimeoutSeconds":120,"tolerations":[]}` | Squid egress proxy configuration. |
+| proxy | object | `{"affinity":{},"allowList":[],"allowedPortsWhenOpen":[80,443,8080,8443,3000,5000,8000,9000],"annotations":{},"defaultBlocked":[".cluster.local","192.168.0.0/16","10.0.0.0/8","172.16.0.0/12","0.0.0.0/8","127.0.0.0/8","169.254.0.0/16","100.64.0.0/10","::1/128","fc00::/7","fe80::/10"],"defaultBlockedExceptions":[],"denyList":[],"env":[],"envFrom":[],"gracefulShutdownSeconds":45,"image":{"pullPolicy":"Always","repository":"ubuntu/squid","tag":"7.2-26.04_edge"},"labels":{},"nodeSelector":{},"podAnnotations":{},"podDisruptionBudget":{"enabled":false,"minAvailable":1},"podLabels":{},"probes":{"quiet":true},"replicaCount":1,"resources":{},"revisionHistoryLimit":5,"service":{"port":3128,"type":"ClusterIP"},"startupWaitTimeoutSeconds":120,"tolerations":[]}` | Squid egress proxy configuration. |
 | proxy.affinity | object | `{}` | affinity for the squid Deployment. When left empty AND replicaCount > 1, a preferred podAntiAffinity (topologyKey: kubernetes.io/hostname) is generated automatically, spreading squid replicas across nodes. Set this explicitly to take full control instead (it's used as-is, replacing that auto-generation). |
-| proxy.allowList | list | `[]` | Destinations agents are allowed to reach. Each entry is either a domain (e.g. "example.com", or ".example.com" to also match subdomains) or a CIDR (detected by the presence of "/", e.g. "140.82.112.0/20").  When EMPTY: all web traffic is permitted (subject to denyList/defaultBlocked below), on the ports listed in allowedPortsWhenOpen, plus github.com:22 for git+ssh. When NON-EMPTY: only these destinations are reachable (on ports 80/443), plus github.com:22 for git+ssh - that carve-out applies in BOTH modes (agents always clone/push over SSH, tunneled through squid; see sshKey above), unless github.com is itself in denyList. |
+| proxy.allowList | list | `[]` | Destinations agents are allowed to reach. Each entry is either a domain (e.g. "example.com", or ".example.com" to also match subdomains) or a CIDR (detected by the presence of "/", e.g. "140.82.112.0/20"). A request to a raw IP only matches a CIDR entry - domains are never matched via the IP's reverse DNS name, which whoever owns the IP controls. The same applies to denyList, defaultBlocked and defaultBlockedExceptions.  When EMPTY: all web traffic is permitted (subject to denyList/defaultBlocked below), on the ports listed in allowedPortsWhenOpen, plus github.com:22 for git+ssh. When NON-EMPTY: only these destinations are reachable (on ports 80/443), plus github.com:22 for git+ssh - that carve-out applies in BOTH modes (agents always clone/push over SSH, tunneled through squid; see sshKey above), unless github.com is itself in denyList. |
 | proxy.allowedPortsWhenOpen | list | `[80,443,8080,8443,3000,5000,8000,9000]` | Ports permitted for any destination when allowList is EMPTY (open-web mode). Ignored in strict allow-list mode (only 80/443 are opened there). |
 | proxy.annotations | object | `{}` | Extra annotations added to the squid Deployment object (not its pods). Values are coerced to strings. The chart puts no annotations of its own on this object, so no key is reserved here. |
-| proxy.defaultBlocked | list | `["cluster.local","192.168.0.0/16","10.0.0.0/8","172.16.0.0/12"]` | Baked-in destinations that are ALWAYS blocked on top of denyList. Not intended to be overridden — these protect cluster-internal networks. |
+| proxy.defaultBlocked | list | `[".cluster.local","192.168.0.0/16","10.0.0.0/8","172.16.0.0/12","0.0.0.0/8","127.0.0.0/8","169.254.0.0/16","100.64.0.0/10","::1/128","fc00::/7","fe80::/10"]` | Baked-in destinations that are blocked on top of denyList. Not intended to be overridden — these protect cluster-internal networks. To reach one specific host inside them, add it to defaultBlockedExceptions instead of editing this list. |
+| proxy.defaultBlockedExceptions | list | `[]` | Destinations exempted from defaultBlocked, for hosts agents legitimately need inside those ranges (e.g. an internal registry on 10.x, or an in-cluster Service). Same entry format as allowList; keep entries as narrow as possible. An exemption ONLY lifts defaultBlocked: denyList still wins, and in strict allow-list mode the destination must ALSO be in allowList. A domain exemption covers whatever address that name resolves to, so only list names whose DNS you trust. A raw-IP request only matches a CIDR exemption. |
 | proxy.denyList | list | `[]` | Destinations that are always blocked, regardless of allow-list mode. Takes precedence over allowList and over the github.com:22 git+ssh carve-out. |
 | proxy.env | list | `[]` | Extra env vars added to the squid container, alongside the chart's own PEBBLE_VERBOSE. Same shape as a container's `env`; supports `valueFrom`. |
 | proxy.envFrom | list | `[]` | Extra envFrom added to the squid container. Same shape as a container's `envFrom`. |

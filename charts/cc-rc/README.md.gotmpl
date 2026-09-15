@@ -489,8 +489,27 @@ hard-coded, renaming an emitted label keeps this guard in step automatically.
 
 `proxy.allowList` empty (default) = open-web mode: any destination is reachable on
 `proxy.allowedPortsWhenOpen`, plus `github.com:22` for git+ssh, except `proxy.denyList`
-and the baked-in cluster-internal ranges (`cluster.local`, `192.168.0.0/16`,
-`10.0.0.0/8`, `172.16.0.0/12`).
+and the baked-in internal destinations in `proxy.defaultBlocked`: `.cluster.local`,
+RFC1918 (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), `0.0.0.0/8`, loopback
+(`127.0.0.0/8`, `::1/128`), link-local including the cloud metadata endpoint
+(`169.254.0.0/16`, `fe80::/10`), carrier-grade NAT (`100.64.0.0/10`) and IPv6
+unique-local (`fc00::/7`).
+
+To reach one specific host inside those ranges (an internal registry on 10.x, an
+in-cluster `Service`), list it in `proxy.defaultBlockedExceptions` rather than editing
+`proxy.defaultBlocked`. Exemptions are a hole in `defaultBlocked` only: `proxy.denyList`
+still wins over them, and in strict mode the host must also be in `proxy.allowList`:
+
+```yaml
+proxy:
+  allowList:
+    - registry.corp.internal
+  defaultBlockedExceptions:
+    - registry.corp.internal  # resolves to 10.20.30.40
+```
+
+A domain exemption covers whatever address that name resolves to, so only exempt names
+whose DNS you trust. A request to a raw IP only matches a CIDR exemption.
 
 Setting `proxy.allowList` switches to strict mode: only those domains/CIDRs (ports
 80/443) are reachable — `github.com:22` is still carved out in this mode too (every

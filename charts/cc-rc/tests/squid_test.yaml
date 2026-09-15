@@ -320,7 +320,7 @@ tests:
           of: ConfigMap
       - matchRegex:
           path: data["squid.conf"]
-          pattern: "acl github_ssh dstdomain github.com"
+          pattern: "acl github_ssh dstdomain -n github.com"
       - matchRegex:
           path: data["squid.conf"]
           pattern: "http_access allow github_ssh port_22"
@@ -329,10 +329,10 @@ tests:
           pattern: "acl open_ports port 80 443 8080 8443 3000 5000 8000 9000"
       - matchRegex:
           path: data["squid.conf"]
-          pattern: "acl default_blocked_domains dstdomain cluster.local"
+          pattern: "acl default_blocked_domains dstdomain -n \\.cluster\\.local\n"
       - matchRegex:
           path: data["squid.conf"]
-          pattern: "acl default_blocked_cidrs dst 192.168.0.0/16 10.0.0.0/8 172.16.0.0/12"
+          pattern: "acl default_blocked_cidrs dst 192.168.0.0/16 10.0.0.0/8 172.16.0.0/12 0.0.0.0/8 127.0.0.0/8 169.254.0.0/16 100.64.0.0/10 ::1/128 fc00::/7 fe80::/10\n"
 
   - it: sends access_log and cache_log to stdout instead of the default log files
     template: configmap-squid.yaml
@@ -354,13 +354,13 @@ tests:
     asserts:
       - matchRegex:
           path: data["squid.conf"]
-          pattern: "acl allow_domains dstdomain github.com"
+          pattern: "acl allow_domains dstdomain -n github.com"
       - matchRegex:
           path: data["squid.conf"]
           pattern: "acl allow_cidrs dst 140.82.112.0/20"
       - matchRegex:
           path: data["squid.conf"]
-          pattern: "acl github_ssh dstdomain github.com"
+          pattern: "acl github_ssh dstdomain -n github.com"
       - matchRegex:
           path: data["squid.conf"]
           pattern: "http_access allow github_ssh port_22"
@@ -377,10 +377,82 @@ tests:
     asserts:
       - matchRegex:
           path: data["squid.conf"]
-          pattern: "acl user_deny_domains dstdomain .evil.example.com"
+          pattern: "acl user_deny_domains dstdomain -n .evil.example.com"
       - matchRegex:
           path: data["squid.conf"]
           pattern: "acl user_deny_cidrs dst 203.0.113.0/24"
+
+  - it: no defaultBlockedExceptions by default, so defaultBlocked deny lines are unconditional
+    template: configmap-squid.yaml
+    asserts:
+      - notMatchRegex:
+          path: data["squid.conf"]
+          pattern: "default_blocked_except"
+      - matchRegex:
+          path: data["squid.conf"]
+          pattern: "(?m)^\\s*http_access deny default_blocked_domains$"
+      - matchRegex:
+          path: data["squid.conf"]
+          pattern: "(?m)^\\s*http_access deny default_blocked_cidrs$"
+
+  - it: defaultBlockedExceptions exempts domains and CIDRs from BOTH defaultBlocked deny lines
+    template: configmap-squid.yaml
+    set:
+      proxy.defaultBlockedExceptions:
+        - registry.corp.internal
+        - my-svc.my-ns.svc.cluster.local
+        - 10.20.30.40/32
+    asserts:
+      - matchRegex:
+          path: data["squid.conf"]
+          pattern: "acl default_blocked_except_domains dstdomain -n registry.corp.internal my-svc.my-ns.svc.cluster.local\n"
+      - matchRegex:
+          path: data["squid.conf"]
+          pattern: "acl default_blocked_except_cidrs dst 10.20.30.40/32\n"
+      - matchRegex:
+          path: data["squid.conf"]
+          pattern: "http_access deny default_blocked_domains !default_blocked_except_domains !default_blocked_except_cidrs\n"
+      - matchRegex:
+          path: data["squid.conf"]
+          pattern: "http_access deny default_blocked_cidrs !default_blocked_except_domains !default_blocked_except_cidrs\n"
+
+  - it: a CIDR-only defaultBlockedExceptions never references an undefined domain exception ACL
+    template: configmap-squid.yaml
+    set:
+      proxy.defaultBlockedExceptions:
+        - 10.20.30.40/32
+    asserts:
+      - notMatchRegex:
+          path: data["squid.conf"]
+          pattern: "default_blocked_except_domains"
+      - matchRegex:
+          path: data["squid.conf"]
+          pattern: "http_access deny default_blocked_cidrs !default_blocked_except_cidrs\n"
+
+  - it: defaultBlockedExceptions never outrank denyList, which still renders after them
+    template: configmap-squid.yaml
+    set:
+      proxy.defaultBlockedExceptions:
+        - registry.corp.internal
+      proxy.denyList:
+        - registry.corp.internal
+    asserts:
+      - matchRegex:
+          path: data["squid.conf"]
+          pattern: "(?s)http_access deny default_blocked_cidrs !default_blocked_except_domains.*http_access deny user_deny_domains"
+
+  - it: omits a defaultBlocked ACL entirely rather than rendering it empty
+    template: configmap-squid.yaml
+    set:
+      proxy.defaultBlocked:
+        - .cluster.local
+    asserts:
+      - notMatchRegex:
+          path: data["squid.conf"]
+          pattern: "default_blocked_cidrs"
+      - matchRegex:
+          path: data["squid.conf"]
+          pattern: "http_access deny default_blocked_domains\n"
 
   - it: adds proxy.labels/proxy.annotations to the Deployment object only, and proxy.podLabels/proxy.podAnnotations to its pods only
     template: deployment-squid.yaml
