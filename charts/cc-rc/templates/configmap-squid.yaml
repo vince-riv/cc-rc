@@ -102,8 +102,7 @@ data:
 
     # -- 2. baked-in defaultBlocked destinations, denied unless exempted --
     # Each exemption ACL is negated onto BOTH deny lines, so a domain exemption
-    # also covers the private address that name resolves to, and a CIDR
-    # exemption also covers names (e.g. *.svc.cluster.local) resolving into it.
+    # also covers the private address that name resolves to.
     {{- $exempt := "" }}
     {{- if $exceptDomains }}
     # -n: match by requested name only - never reverse-DNS a raw-IP request
@@ -112,7 +111,14 @@ data:
     {{- $exempt = printf "%s !default_blocked_except_domains" $exempt }}
     {{- end }}
     {{- if $exceptCidrs }}
-    acl default_blocked_except_cidrs dst {{ $exceptCidrs | join " " }}
+    # A CIDR exemption only covers requests for a raw IP. A dst ACL matches a
+    # hostname if ANY of its addresses is in range, so a name resolving to one
+    # exempt and one blocked address (e.g. 169.254.169.254) would match both
+    # the CIDR deny line and this exemption, lifting the deny and letting squid
+    # connect to the blocked address. Names need a domain exemption instead.
+    acl raw_ip_request dstdom_regex -n ^[0-9]+(\.[0-9]+){3}$ ^\[?[0-9a-fA-F.]*:[0-9a-fA-F:.]*\]?$
+    acl default_blocked_except_cidr_dst dst {{ $exceptCidrs | join " " }}
+    acl default_blocked_except_cidrs all-of raw_ip_request default_blocked_except_cidr_dst
     {{- $exempt = printf "%s !default_blocked_except_cidrs" $exempt }}
     {{- end }}
     {{- if $blockedDomains }}

@@ -495,8 +495,8 @@ RFC1918 (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), `0.0.0.0/8`, loopback
 (`169.254.0.0/16`, `fe80::/10`), carrier-grade NAT (`100.64.0.0/10`) and IPv6
 unique-local (`fc00::/7`).
 
-To reach one specific host inside those ranges (an internal registry on 10.x, an
-in-cluster `Service`), list it in `proxy.defaultBlockedExceptions` rather than editing
+To reach one specific host inside those ranges (for example an internal registry on
+10.x), list it in `proxy.defaultBlockedExceptions` rather than editing
 `proxy.defaultBlocked`. Exemptions are a hole in `defaultBlocked` only: `proxy.denyList`
 still wins over them, and in strict mode the host must also be in `proxy.allowList`:
 
@@ -509,7 +509,12 @@ proxy:
 ```
 
 A domain exemption covers whatever address that name resolves to, so only exempt names
-whose DNS you trust. A request to a raw IP only matches a CIDR exemption.
+whose DNS you trust. A CIDR exemption only covers requests for a raw IP in that range,
+never a hostname that resolves into it — exempt the hostname itself.
+
+Exemptions don't make in-cluster `Service`s reachable: `.svc` and `.cluster.local` are
+in agent pods' `NO_PROXY`, so that traffic skips squid, and the agent `NetworkPolicy`
+drops it.
 
 Setting `proxy.allowList` switches to strict mode: only those domains/CIDRs (ports
 80/443) are reachable — `github.com:22` is still carved out in this mode too (every

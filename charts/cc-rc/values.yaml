@@ -462,15 +462,18 @@ proxy:
     - fe80::/10
 
   # -- Destinations exempted from defaultBlocked, for hosts agents legitimately need
-  # inside those ranges (e.g. an internal registry on 10.x, or an in-cluster Service).
-  # Same entry format as allowList; keep entries as narrow as possible.
+  # inside those ranges (e.g. an internal registry on 10.x). Same entry format as
+  # allowList; keep entries as narrow as possible.
   # An exemption ONLY lifts defaultBlocked: denyList still wins, and in strict
-  # allow-list mode the destination must ALSO be in allowList. A domain exemption
-  # covers whatever address that name resolves to, so only list names whose DNS you
-  # trust. A raw-IP request only matches a CIDR exemption.
+  # allow-list mode the destination must ALSO be in allowList.
+  # A domain exemption covers whatever address that name resolves to, so only list
+  # names whose DNS you trust. A CIDR exemption only covers requests for a raw IP in
+  # that range, never a hostname resolving into it - exempt the hostname itself.
+  # This does not make in-cluster Services reachable: .svc/.cluster.local names are
+  # in agent pods' NO_PROXY, so that traffic skips squid and the agent NetworkPolicy
+  # drops it.
   defaultBlockedExceptions: []
     # - registry.corp.internal
-    # - my-svc.my-ns.svc.cluster.local
     # - 10.20.30.40/32
 
 # -- NetworkPolicy that denies all egress from per-repo agent pods except to the squid

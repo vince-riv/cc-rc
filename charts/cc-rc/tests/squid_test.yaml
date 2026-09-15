@@ -400,15 +400,23 @@ tests:
     set:
       proxy.defaultBlockedExceptions:
         - registry.corp.internal
-        - my-svc.my-ns.svc.cluster.local
+        - git.corp.internal
         - 10.20.30.40/32
     asserts:
       - matchRegex:
           path: data["squid.conf"]
-          pattern: "acl default_blocked_except_domains dstdomain -n registry.corp.internal my-svc.my-ns.svc.cluster.local\n"
+          pattern: "acl default_blocked_except_domains dstdomain -n registry.corp.internal git.corp.internal\n"
       - matchRegex:
           path: data["squid.conf"]
-          pattern: "acl default_blocked_except_cidrs dst 10.20.30.40/32\n"
+          pattern: "acl default_blocked_except_cidr_dst dst 10.20.30.40/32\n"
+      # CIDR exemptions only apply to raw-IP requests - a multi-address hostname
+      # with one exempt address must not lift the deny.
+      - matchRegex:
+          path: data["squid.conf"]
+          pattern: "acl raw_ip_request dstdom_regex -n "
+      - matchRegex:
+          path: data["squid.conf"]
+          pattern: "acl default_blocked_except_cidrs all-of raw_ip_request default_blocked_except_cidr_dst\n"
       - matchRegex:
           path: data["squid.conf"]
           pattern: "http_access deny default_blocked_domains !default_blocked_except_domains !default_blocked_except_cidrs\n"
