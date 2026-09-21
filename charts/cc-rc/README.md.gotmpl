@@ -25,9 +25,6 @@ repo, each behind a locked-down [Squid](https://www.squid-cache.org/) egress pro
   - a 5Gi PVC mounted at `/workspace`
   - a 2Gi `emptyDir` mounted at `/tmp` on the agent container (`storage.tmpSize`) —
     e.g. for `cc-rc-pr-update`'s PR summary/plan/ledger drafts
-  - a `fix-tmp-perms` init container that sets the sticky bit on `/tmp` (mode `1777`;
-    kubelet creates `emptyDir` volumes without it, and some applications refuse to write
-    to a world-writable `/tmp` otherwise). It is the only container that runs as root.
   - a `seed-home` init container that syncs the image's baked-in `/home/dev` onto the
     home PVC on every start, with different rules for `~/.claude/` vs. everywhere else:
     `~/.claude/` files the image ships (e.g. `~/.claude/settings.json`) are always
@@ -43,6 +40,10 @@ repo, each behind a locked-down [Squid](https://www.squid-cache.org/) egress pro
     keys if it isn't already there — see "SSH deploy key" below
   - a `clone-repo` init container that clones the repo, over SSH, into
     `/workspace/repo` (skipped if already cloned)
+  - a `fix-tmp-perms` init container that sets the sticky bit on `/tmp` (mode `3777`,
+    which also keeps the setgid bit that `fsGroup` puts on the `emptyDir`; kubelet does
+    not set the sticky bit, and some applications refuse to write to a world-writable
+    `/tmp` without it). It is the only container that runs as root.
   - `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` (+ lowercase variants) pointed at the Squid
     `Service`, and `GH_TOKEN` from the `Secret` key matching this StatefulSet's own
     `repos[].org`

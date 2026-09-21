@@ -164,7 +164,7 @@ tests:
       - documentIndex: 1
         equal:
           path: spec.template.spec.initContainers[4].command
-          value: ["chmod", "1777", "/tmp"]
+          value: ["chmod", "3777", "/tmp"]
       - documentIndex: 1
         equal:
           path: spec.template.spec.initContainers[4].securityContext.runAsUser
