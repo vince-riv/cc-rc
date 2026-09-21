@@ -150,6 +150,32 @@ tests:
             emptyDir:
               sizeLimit: 2Gi
 
+  - it: sets the sticky bit on /tmp via a root init container
+    template: statefulset-repo.yaml
+    set:
+      repos:
+        - org: myorg
+          repo: myrepo
+    asserts:
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.initContainers[4].name
+          value: fix-tmp-perms
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.initContainers[4].command
+          value: ["chmod", "3777", "/tmp"]
+      - documentIndex: 1
+        equal:
+          path: spec.template.spec.initContainers[4].securityContext.runAsUser
+          value: 0
+      - documentIndex: 1
+        contains:
+          path: spec.template.spec.initContainers[4].volumeMounts
+          content:
+            name: tmp
+            mountPath: /tmp
+
   - it: a repo can override the /tmp emptyDir size
     template: statefulset-repo.yaml
     set:

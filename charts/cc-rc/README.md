@@ -37,6 +37,10 @@ repo, each behind a locked-down [Squid](https://www.squid-cache.org/) egress pro
     keys if it isn't already there — see "SSH deploy key" below
   - a `clone-repo` init container that clones the repo, over SSH, into
     `/workspace/repo` (skipped if already cloned)
+  - a `fix-tmp-perms` init container that sets the sticky bit on `/tmp` (mode `3777`,
+    which also keeps the setgid bit that `fsGroup` puts on the `emptyDir`; kubelet does
+    not set the sticky bit, and some applications refuse to write to a world-writable
+    `/tmp` without it). It is the only container that runs as root.
   - `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` (+ lowercase variants) pointed at the Squid
     `Service`, and `GH_TOKEN` from the `Secret` key matching this StatefulSet's own
     `repos[].org`
