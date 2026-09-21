@@ -25,6 +25,9 @@ repo, each behind a locked-down [Squid](https://www.squid-cache.org/) egress pro
   - a 5Gi PVC mounted at `/workspace`
   - a 2Gi `emptyDir` mounted at `/tmp` on the agent container (`storage.tmpSize`) —
     e.g. for `cc-rc-pr-update`'s PR summary/plan/ledger drafts
+  - a `fix-tmp-perms` init container that sets the sticky bit on `/tmp` (mode `1777`;
+    kubelet creates `emptyDir` volumes without it, and some applications refuse to write
+    to a world-writable `/tmp` otherwise). It is the only container that runs as root.
   - a `seed-home` init container that syncs the image's baked-in `/home/dev` onto the
     home PVC on every start, with different rules for `~/.claude/` vs. everywhere else:
     `~/.claude/` files the image ships (e.g. `~/.claude/settings.json`) are always

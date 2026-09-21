@@ -177,6 +177,25 @@ spec:
               subPath: .gitignore_global
             - name: scripts
               mountPath: /opt/cc-rc/scripts
+        - name: fix-tmp-perms
+          # kubelet creates an emptyDir as 0777 with no sticky bit, and some
+          # applications refuse to use a world-writable /tmp without one.
+          # The dir is owned by root, so the non-root `dev` user can't chmod
+          # it - this is the one container that runs as root. Root already
+          # owns the dir, so no capabilities are needed.
+          image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          command: ["chmod", "1777", "/tmp"]
+          securityContext:
+            runAsUser: 0
+            runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
       containers:
         - name: agent
           image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
