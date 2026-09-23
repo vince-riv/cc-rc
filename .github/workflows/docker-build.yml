@@ -20,6 +20,14 @@ on:
   # even without a Dockerfile change. Wednesdays at 07:30 UTC.
   schedule:
     - cron: '30 7 * * 3'
+  # Manual runs: pick a branch/tag from the "Use workflow from" selector,
+  # or set ref to build an arbitrary ref (e.g. a commit SHA) instead.
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch, tag, or SHA to build (defaults to the selected branch)'
+        required: false
+        type: string
 
 env:
   REGISTRY: ghcr.io
@@ -57,6 +65,8 @@ jobs:
     steps:
       - name: Check out repo
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
