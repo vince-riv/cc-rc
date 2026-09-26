@@ -10,7 +10,7 @@ set -euo pipefail
 # it - see setup-dev.sh - so `nvm use 22/24/26` works without re-downloading.
 #
 # renovate: datasource=node-version depName=node-22
-NODE22_VERSION=22.23.2
+NODE22_VERSION=22.23.3
 # renovate: datasource=node-version depName=node-24
 NODE24_VERSION=24.21.0
 # renovate: datasource=node-version depName=node-26
