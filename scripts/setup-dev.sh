@@ -58,7 +58,7 @@ EOF
 # which is what used to make ~/.nvm hundreds of MB bigger than it needed
 # to be.
 # renovate: datasource=github-releases depName=nvm-sh/nvm
-NVM_VERSION=v0.40.7
+NVM_VERSION=v0.40.8
 curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 \
     "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh" | bash
 \. "$HOME/.nvm/nvm.sh"
