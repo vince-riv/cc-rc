@@ -99,6 +99,11 @@ RUN --mount=type=bind,source=scripts/setup-gh.sh,target=/opt/build-scripts/setup
     --mount=type=tmpfs,target=/tmp \
     bash /opt/build-scripts/setup-gh.sh
 
+# GitLab CLI, latest release straight from GitLab (not in Ubuntu's apt repos).
+RUN --mount=type=bind,source=scripts/setup-glab.sh,target=/opt/build-scripts/setup-glab.sh \
+    --mount=type=tmpfs,target=/tmp \
+    bash /opt/build-scripts/setup-glab.sh
+
 # Shared PATH config for ~/.local/bin (see scripts/setup-path.sh).
 RUN --mount=type=bind,source=scripts/setup-path.sh,target=/opt/build-scripts/setup-path.sh \
     bash /opt/build-scripts/setup-path.sh
