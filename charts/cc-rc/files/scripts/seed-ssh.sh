@@ -5,6 +5,9 @@ SQUID_HOST="${SQUID_HOST:-}"
 if [ -n "$SQUID_HOST" ]; then
   : "${SQUID_PORT:?SQUID_PORT is required when SQUID_HOST is set}"
 fi
+# Space-separated hosts reached over git+ssh (chart value proxy.sshHosts).
+# Unset (scripts/run-local.sh) means both hosts we ship host keys for.
+SSH_HOSTS="${SSH_HOSTS-github.com gitlab.com}"
 SSH_DIR="/mnt/home-pvc/.ssh"
 
 mkdir -p "$SSH_DIR"
@@ -18,7 +21,7 @@ install -m 644 /mnt/ssh-key/id_ed25519.pub "$SSH_DIR/id_ed25519.pub"
 
 # With a proxy in front of us, tunnel git+ssh through squid via
 # connect-proxy's `connect` (CONNECT method) - squid's own squid.conf allows
-# CONNECT to github.com:22 and gitlab.com:22 unconditionally, see
+# CONNECT to every host in SSH_HOSTS (port 22) unconditionally, see
 # configmap-squid.yaml. Without one, ssh reaches the hosts directly and no
 # ProxyCommand is written.
 PROXY_LINE=""
@@ -28,21 +31,18 @@ fi
 
 # Always rewritten (unlike known_hosts below): squid's host/port are
 # chart-derived, not user data, so a stale copy should never win.
-cat > "$SSH_DIR/config" <<EOF
-Host github.com
-    User git
-    IdentityFile ~/.ssh/id_ed25519
-    IdentitiesOnly yes
-    StrictHostKeyChecking yes
-${PROXY_LINE}
-
-Host gitlab.com
+if [ -n "$SSH_HOSTS" ]; then
+  cat > "$SSH_DIR/config" <<EOF
+Host ${SSH_HOSTS}
     User git
     IdentityFile ~/.ssh/id_ed25519
     IdentitiesOnly yes
     StrictHostKeyChecking yes
 ${PROXY_LINE}
 EOF
+else
+  : > "$SSH_DIR/config"
+fi
 chmod 644 "$SSH_DIR/config"
 
 KNOWN_HOSTS="$SSH_DIR/known_hosts"
@@ -61,7 +61,17 @@ fi
 # GitLab's host key is added separately from the block above, so PVCs that
 # already hold a known_hosts file still get it. ED25519 fingerprint
 # SHA256:eUXGGm1YGsMAS7vkcx6JOJdOGHPem5gQp4taiCfCLB8 (published by GitLab).
-if ! grep -qE '^gitlab\.com ' "$KNOWN_HOSTS"; then
-  echo "Adding GitLab's published host key to $KNOWN_HOSTS."
-  echo 'gitlab.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAfuCHKVTjquxvt6CM6tdG4SLp1Btn/nOeHHE5UOzRdf' >> "$KNOWN_HOSTS"
-fi
+# `ssh-keygen -F` also finds hashed, comma-listed and @revoked entries, so
+# nothing is duplicated or re-added over a deliberate revocation.
+case " $SSH_HOSTS " in
+  *" gitlab.com "*)
+    if ! ssh-keygen -F gitlab.com -f "$KNOWN_HOSTS" > /dev/null; then
+      echo "Adding GitLab's published host key to $KNOWN_HOSTS."
+      # A file without a trailing newline would merge its last line with ours.
+      if [ -s "$KNOWN_HOSTS" ] && [ -n "$(tail -c1 "$KNOWN_HOSTS")" ]; then
+        echo >> "$KNOWN_HOSTS"
+      fi
+      echo 'gitlab.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAfuCHKVTjquxvt6CM6tdG4SLp1Btn/nOeHHE5UOzRdf' >> "$KNOWN_HOSTS"
+    fi
+    ;;
+esac

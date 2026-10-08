@@ -80,7 +80,7 @@ tests:
           pattern: 'ProxyCommand connect -H \$\{SQUID_HOST\}:\$\{SQUID_PORT\} %h %p'
       - matchRegex:
           path: data["seed-ssh.sh"]
-          pattern: "Host gitlab\\.com\\n    User git"
+          pattern: "Host \\$\\{SSH_HOSTS\\}\\n    User git"
       - matchRegex:
           path: data["seed-ssh.sh"]
           pattern: "gitlab\\.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAfuCHKVTjquxvt6CM6tdG4SLp1Btn/nOeHHE5UOzRdf"

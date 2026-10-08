@@ -265,12 +265,16 @@ every boot (`~/.ssh/id_ed25519` at `0600`, `~/.ssh` at `0700`) and seeds
 `~/.ssh/known_hosts` with GitHub's published host keys — but only if `known_hosts`
 doesn't already exist, so it's never clobbered once present. GitLab's host key for
 `gitlab.com` is appended if missing. It also (re)writes
-`~/.ssh/config` on every boot, pointing `git@github.com` and `git@gitlab.com` at a `ProxyCommand` (the
+`~/.ssh/config` on every boot, pointing every `proxy.sshHosts` host (default `github.com` and `gitlab.com`) at a `ProxyCommand` (the
 `connect-proxy` package's `connect`) that tunnels the SSH connection through squid via
-`CONNECT` — squid's own config unconditionally allows `CONNECT` to `github.com:22` and `gitlab.com:22`
-(regardless of `proxy.allowList`/`proxy.denyList`, unless `github.com` is itself denied)
+`CONNECT` — squid's own config unconditionally allows `CONNECT` to port 22 on those hosts
+(regardless of `proxy.allowList`, unless the host is in `proxy.denyList`)
 — so no separate `NetworkPolicy` rule is needed: agent pods already have egress to the
 squid `Service`, and squid's own egress is unrestricted.
+
+The Job registers the key on GitHub only. **For GitLab, add `~/.ssh/id_ed25519.pub` to the
+GitLab account (or as a project deploy key) yourself**, or `git@gitlab.com` fails with
+"Permission denied (publickey)".
 
 Set `sshKey.enabled: false` to skip the Job (e.g. you manage `sshKey.secretName`
 yourself, out of band) — the per-repo `StatefulSet`s still expect it to hold
@@ -494,7 +498,7 @@ hard-coded, renaming an emitted label keeps this guard in step automatically.
 ## Configuring egress
 
 `proxy.allowList` empty (default) = open-web mode: any destination is reachable on
-`proxy.allowedPortsWhenOpen`, plus `github.com:22` for git+ssh, except `proxy.denyList`
+`proxy.allowedPortsWhenOpen`, plus port 22 on `proxy.sshHosts` (`github.com`, `gitlab.com`) for git+ssh, except `proxy.denyList`
 and the baked-in internal destinations in `proxy.defaultBlocked`: `.cluster.local`,
 RFC1918 (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), `0.0.0.0/8`, loopback
 (`127.0.0.0/8`, `::1/128`), link-local including the cloud metadata endpoint
@@ -524,9 +528,10 @@ drops it. Use `networkPolicy.extraEgress` (see below) to allow specific in-clust
 destinations.
 
 Setting `proxy.allowList` switches to strict mode: only those domains/CIDRs (ports
-80/443) are reachable — `github.com:22` is still carved out in this mode too (every
-agent needs it for its own deploy key; see "SSH deploy key" above), unless `github.com`
-is itself in `proxy.denyList`, which always wins over both.
+80/443) are reachable — port 22 on `proxy.sshHosts` is still carved out in this mode too (agents
+clone over SSH; see "SSH deploy key" above), unless the host is itself in
+`proxy.denyList`, which always wins over both. To close GitLab SSH, remove `gitlab.com`
+from `proxy.sshHosts`.
 
 For traffic that doesn't go through squid — in-cluster `Service`s (in `NO_PROXY`) or
 protocols that ignore `HTTP(S)_PROXY` — add rules to `networkPolicy.extraEgress`. This is

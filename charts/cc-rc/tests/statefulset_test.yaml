@@ -895,11 +895,11 @@ tests:
       - documentIndex: 1
         equal:
           path: spec.template.metadata.annotations["checksum/scripts"]
-          value: "de4cedda1c56a4ac9a362f63e6d00bd2201aaa7d46ef1f4b095064525ebe41ec"
+          value: "7b72291c0ac3f30c77d8fc8c3f4e3e0c455d5a09e2b4df59dfb2be5e082060db"
       - documentIndex: 3
         equal:
           path: spec.template.metadata.annotations["checksum/scripts"]
-          value: "de4cedda1c56a4ac9a362f63e6d00bd2201aaa7d46ef1f4b095064525ebe41ec"
+          value: "7b72291c0ac3f30c77d8fc8c3f4e3e0c455d5a09e2b4df59dfb2be5e082060db"
 
   - it: fails when remoteControl.permissionMode is not a recognized value
     template: statefulset-repo.yaml

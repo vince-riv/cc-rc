@@ -409,11 +409,11 @@ proxy:
   # denyList, defaultBlocked and defaultBlockedExceptions.
   #
   # When EMPTY: all web traffic is permitted (subject to denyList/defaultBlocked below),
-  # on the ports listed in allowedPortsWhenOpen, plus github.com:22 for git+ssh.
+  # on the ports listed in allowedPortsWhenOpen, plus port 22 on sshHosts for git+ssh.
   # When NON-EMPTY: only these destinations are reachable (on ports 80/443), plus
-  # github.com:22 for git+ssh - that carve-out applies in BOTH modes (agents always
-  # clone/push over SSH, tunneled through squid; see sshKey above), unless github.com
-  # is itself in denyList.
+  # port 22 on sshHosts for git+ssh - that carve-out applies in BOTH modes (agents
+  # clone/push over SSH, tunneled through squid; see sshKey above), except for hosts
+  # that are in denyList.
   allowList: []
     # - github.com
     # - .githubusercontent.com
@@ -421,10 +421,20 @@ proxy:
     # - 140.82.112.0/20
 
   # -- Destinations that are always blocked, regardless of allow-list mode. Takes
-  # precedence over allowList and over the github.com:22 git+ssh carve-out.
+  # precedence over allowList and over the sshHosts git+ssh carve-out.
   denyList: []
     # - .evil.example.com
     # - 203.0.113.0/24
+
+  # -- Hosts agents reach over git+ssh (port 22). Squid always allows CONNECT to
+  # them, in both allow-list modes (unless a host is in denyList), and each agent's
+  # ~/.ssh/config tunnels them through squid. The chart ships host keys for
+  # github.com and gitlab.com only: any other host needs its key in known_hosts.
+  # The deploy key is registered on GitHub by the sshKey Job; for GitLab, add the
+  # public key to the GitLab account yourself. Remove gitlab.com to close that port.
+  sshHosts:
+    - github.com
+    - gitlab.com
 
   # -- Ports permitted for any destination when allowList is EMPTY (open-web mode).
   # Ignored in strict allow-list mode (only 80/443 are opened there).

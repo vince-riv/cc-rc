@@ -320,13 +320,10 @@ tests:
           of: ConfigMap
       - matchRegex:
           path: data["squid.conf"]
-          pattern: "acl github_ssh dstdomain -n github.com"
+          pattern: "acl ssh_hosts dstdomain -n github.com gitlab.com"
       - matchRegex:
           path: data["squid.conf"]
-          pattern: "http_access allow github_ssh port_22"
-      - matchRegex:
-          path: data["squid.conf"]
-          pattern: "http_access allow gitlab_ssh port_22"
+          pattern: "http_access allow ssh_hosts port_22"
       - matchRegex:
           path: data["squid.conf"]
           pattern: "acl open_ports port 80 443 8080 8443 3000 5000 8000 9000"
@@ -363,10 +360,10 @@ tests:
           pattern: "acl allow_cidrs dst 140.82.112.0/20"
       - matchRegex:
           path: data["squid.conf"]
-          pattern: "acl github_ssh dstdomain -n github.com"
+          pattern: "acl ssh_hosts dstdomain -n github.com gitlab.com"
       - matchRegex:
           path: data["squid.conf"]
-          pattern: "http_access allow github_ssh port_22"
+          pattern: "http_access allow ssh_hosts port_22"
       - matchRegex:
           path: data["squid.conf"]
           pattern: "http_access deny all"
@@ -574,3 +571,25 @@ tests:
       - equal:
           path: spec.template.metadata.annotations["prometheus.io/scrape"]
           value: "true"
+
+  - it: proxy.sshHosts drives the git+ssh carve-out, and an empty list removes it
+    template: configmap-squid.yaml
+    set:
+      proxy.sshHosts:
+        - github.com
+    asserts:
+      - matchRegex:
+          path: data["squid.conf"]
+          pattern: "acl ssh_hosts dstdomain -n github.com\\n"
+      - notMatchRegex:
+          path: data["squid.conf"]
+          pattern: "gitlab"
+
+  - it: an empty proxy.sshHosts writes no ssh_hosts ACL
+    template: configmap-squid.yaml
+    set:
+      proxy.sshHosts: []
+    asserts:
+      - notMatchRegex:
+          path: data["squid.conf"]
+          pattern: "ssh_hosts"

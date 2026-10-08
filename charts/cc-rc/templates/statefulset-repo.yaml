@@ -145,6 +145,8 @@ spec:
               value: {{ $squidHost | quote }}
             - name: SQUID_PORT
               value: {{ $root.Values.proxy.service.port | quote }}
+            - name: SSH_HOSTS
+              value: {{ join " " $root.Values.proxy.sshHosts | quote }}
           volumeMounts:
             - name: home
               mountPath: /mnt/home-pvc

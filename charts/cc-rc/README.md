@@ -262,12 +262,16 @@ every boot (`~/.ssh/id_ed25519` at `0600`, `~/.ssh` at `0700`) and seeds
 `~/.ssh/known_hosts` with GitHub's published host keys — but only if `known_hosts`
 doesn't already exist, so it's never clobbered once present. GitLab's host key for
 `gitlab.com` is appended if missing. It also (re)writes
-`~/.ssh/config` on every boot, pointing `git@github.com` and `git@gitlab.com` at a `ProxyCommand` (the
+`~/.ssh/config` on every boot, pointing every `proxy.sshHosts` host (default `github.com` and `gitlab.com`) at a `ProxyCommand` (the
 `connect-proxy` package's `connect`) that tunnels the SSH connection through squid via
-`CONNECT` — squid's own config unconditionally allows `CONNECT` to `github.com:22` and `gitlab.com:22`
-(regardless of `proxy.allowList`/`proxy.denyList`, unless `github.com` is itself denied)
+`CONNECT` — squid's own config unconditionally allows `CONNECT` to port 22 on those hosts
+(regardless of `proxy.allowList`, unless the host is in `proxy.denyList`)
 — so no separate `NetworkPolicy` rule is needed: agent pods already have egress to the
 squid `Service`, and squid's own egress is unrestricted.
+
+The Job registers the key on GitHub only. **For GitLab, add `~/.ssh/id_ed25519.pub` to the
+GitLab account (or as a project deploy key) yourself**, or `git@gitlab.com` fails with
+"Permission denied (publickey)".
 
 Set `sshKey.enabled: false` to skip the Job (e.g. you manage `sshKey.secretName`
 yourself, out of band) — the per-repo `StatefulSet`s still expect it to hold
@@ -491,7 +495,7 @@ hard-coded, renaming an emitted label keeps this guard in step automatically.
 ## Configuring egress
 
 `proxy.allowList` empty (default) = open-web mode: any destination is reachable on
-`proxy.allowedPortsWhenOpen`, plus `github.com:22` for git+ssh, except `proxy.denyList`
+`proxy.allowedPortsWhenOpen`, plus port 22 on `proxy.sshHosts` (`github.com`, `gitlab.com`) for git+ssh, except `proxy.denyList`
 and the baked-in internal destinations in `proxy.defaultBlocked`: `.cluster.local`,
 RFC1918 (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), `0.0.0.0/8`, loopback
 (`127.0.0.0/8`, `::1/128`), link-local including the cloud metadata endpoint
@@ -521,9 +525,10 @@ drops it. Use `networkPolicy.extraEgress` (see below) to allow specific in-clust
 destinations.
 
 Setting `proxy.allowList` switches to strict mode: only those domains/CIDRs (ports
-80/443) are reachable — `github.com:22` is still carved out in this mode too (every
-agent needs it for its own deploy key; see "SSH deploy key" above), unless `github.com`
-is itself in `proxy.denyList`, which always wins over both.
+80/443) are reachable — port 22 on `proxy.sshHosts` is still carved out in this mode too (agents
+clone over SSH; see "SSH deploy key" above), unless the host is itself in
+`proxy.denyList`, which always wins over both. To close GitLab SSH, remove `gitlab.com`
+from `proxy.sshHosts`.
 
 For traffic that doesn't go through squid — in-cluster `Service`s (in `NO_PROXY`) or
 protocols that ignore `HTTP(S)_PROXY` — add rules to `networkPolicy.extraEgress`. This is
@@ -581,14 +586,14 @@ Pebble entrypoint relay that to its own stdout (otherwise it's only visible via
 | podAnnotations | object | `{}` | Extra annotations added to every per-repo agent POD. Merged on top of the chart's own pod annotations. Override/extend per-repo via `repos[].podAnnotations`, which is merged per key over this default. Values are coerced to strings, so an unquoted `prometheus.io/scrape: true` is safe. `checksum/scripts` is chart-owned (it rolls the pods when a mounted script changes) and is rejected at render time. |
 | podFsGroup | int | `1001` | Group ID applied via pod securityContext.fsGroup so freshly-mounted PVCs are writable by the image's non-root `dev` user (created via `useradd -m`, uid/gid 1001). Changing this value re-chowns existing PVCs on their next pod mount (kubelet does this automatically; fsGroupChangePolicy is not set, so it defaults to "Always"). |
 | podLabels | object | `{}` | Extra labels added to every per-repo agent POD. Merged on top of the chart's own pod labels. Override/extend per-repo via `repos[].podLabels`, which is merged per key over this default. Values are coerced to strings. Setting a label here does not change the StatefulSet's (immutable) pod selector, which always uses the chart's own labels only; the chart-owned label keys are rejected at render time. |
-| proxy | object | `{"affinity":{},"allowList":[],"allowedPortsWhenOpen":[80,443,8080,8443,3000,5000,8000,9000],"annotations":{},"defaultBlocked":[".cluster.local","192.168.0.0/16","10.0.0.0/8","172.16.0.0/12","0.0.0.0/8","127.0.0.0/8","169.254.0.0/16","100.64.0.0/10","::1/128","fc00::/7","fe80::/10"],"defaultBlockedExceptions":[],"denyList":[],"env":[],"envFrom":[],"gracefulShutdownSeconds":45,"image":{"pullPolicy":"Always","repository":"ubuntu/squid","tag":"7.2-26.04_edge"},"labels":{},"nodeSelector":{},"podAnnotations":{},"podDisruptionBudget":{"enabled":false,"minAvailable":1},"podLabels":{},"probes":{"quiet":true},"replicaCount":1,"resources":{},"revisionHistoryLimit":5,"service":{"port":3128,"type":"ClusterIP"},"startupWaitTimeoutSeconds":120,"tolerations":[]}` | Squid egress proxy configuration. |
+| proxy | object | `{"affinity":{},"allowList":[],"allowedPortsWhenOpen":[80,443,8080,8443,3000,5000,8000,9000],"annotations":{},"defaultBlocked":[".cluster.local","192.168.0.0/16","10.0.0.0/8","172.16.0.0/12","0.0.0.0/8","127.0.0.0/8","169.254.0.0/16","100.64.0.0/10","::1/128","fc00::/7","fe80::/10"],"defaultBlockedExceptions":[],"denyList":[],"env":[],"envFrom":[],"gracefulShutdownSeconds":45,"image":{"pullPolicy":"Always","repository":"ubuntu/squid","tag":"7.2-26.04_edge"},"labels":{},"nodeSelector":{},"podAnnotations":{},"podDisruptionBudget":{"enabled":false,"minAvailable":1},"podLabels":{},"probes":{"quiet":true},"replicaCount":1,"resources":{},"revisionHistoryLimit":5,"service":{"port":3128,"type":"ClusterIP"},"sshHosts":["github.com","gitlab.com"],"startupWaitTimeoutSeconds":120,"tolerations":[]}` | Squid egress proxy configuration. |
 | proxy.affinity | object | `{}` | affinity for the squid Deployment. When left empty AND replicaCount > 1, a preferred podAntiAffinity (topologyKey: kubernetes.io/hostname) is generated automatically, spreading squid replicas across nodes. Set this explicitly to take full control instead (it's used as-is, replacing that auto-generation). |
-| proxy.allowList | list | `[]` | Destinations agents are allowed to reach. Each entry is either a domain (e.g. "example.com", or ".example.com" to also match subdomains) or a CIDR (detected by the presence of "/", e.g. "140.82.112.0/20"). A request to a raw IP only matches a CIDR entry - domains are never matched via the IP's reverse DNS name, which whoever owns the IP controls. The same applies to denyList, defaultBlocked and defaultBlockedExceptions.  When EMPTY: all web traffic is permitted (subject to denyList/defaultBlocked below), on the ports listed in allowedPortsWhenOpen, plus github.com:22 for git+ssh. When NON-EMPTY: only these destinations are reachable (on ports 80/443), plus github.com:22 for git+ssh - that carve-out applies in BOTH modes (agents always clone/push over SSH, tunneled through squid; see sshKey above), unless github.com is itself in denyList. |
+| proxy.allowList | list | `[]` | Destinations agents are allowed to reach. Each entry is either a domain (e.g. "example.com", or ".example.com" to also match subdomains) or a CIDR (detected by the presence of "/", e.g. "140.82.112.0/20"). A request to a raw IP only matches a CIDR entry - domains are never matched via the IP's reverse DNS name, which whoever owns the IP controls. The same applies to denyList, defaultBlocked and defaultBlockedExceptions.  When EMPTY: all web traffic is permitted (subject to denyList/defaultBlocked below), on the ports listed in allowedPortsWhenOpen, plus port 22 on sshHosts for git+ssh. When NON-EMPTY: only these destinations are reachable (on ports 80/443), plus port 22 on sshHosts for git+ssh - that carve-out applies in BOTH modes (agents clone/push over SSH, tunneled through squid; see sshKey above), except for hosts that are in denyList. |
 | proxy.allowedPortsWhenOpen | list | `[80,443,8080,8443,3000,5000,8000,9000]` | Ports permitted for any destination when allowList is EMPTY (open-web mode). Ignored in strict allow-list mode (only 80/443 are opened there). |
 | proxy.annotations | object | `{}` | Extra annotations added to the squid Deployment object (not its pods). Values are coerced to strings. The chart puts no annotations of its own on this object, so no key is reserved here. |
 | proxy.defaultBlocked | list | `[".cluster.local","192.168.0.0/16","10.0.0.0/8","172.16.0.0/12","0.0.0.0/8","127.0.0.0/8","169.254.0.0/16","100.64.0.0/10","::1/128","fc00::/7","fe80::/10"]` | Baked-in destinations that are blocked on top of denyList. Not intended to be overridden — these protect cluster-internal networks. To reach one specific host inside them, add it to defaultBlockedExceptions instead of editing this list. |
 | proxy.defaultBlockedExceptions | list | `[]` | Destinations exempted from defaultBlocked, for hosts agents legitimately need inside those ranges (e.g. an internal registry on 10.x). Same entry format as allowList; keep entries as narrow as possible. An exemption ONLY lifts defaultBlocked: denyList still wins, and in strict allow-list mode the destination must ALSO be in allowList. A domain exemption covers whatever address that name resolves to, so only list names whose DNS you trust. A CIDR exemption only covers requests for a raw IP in that range, never a hostname resolving into it - exempt the hostname itself. This does not make in-cluster Services reachable: .svc/.cluster.local names are in agent pods' NO_PROXY, so that traffic skips squid and the agent NetworkPolicy drops it. Use networkPolicy.extraEgress to allow specific in-cluster destinations. |
-| proxy.denyList | list | `[]` | Destinations that are always blocked, regardless of allow-list mode. Takes precedence over allowList and over the github.com:22 git+ssh carve-out. |
+| proxy.denyList | list | `[]` | Destinations that are always blocked, regardless of allow-list mode. Takes precedence over allowList and over the sshHosts git+ssh carve-out. |
 | proxy.env | list | `[]` | Extra env vars added to the squid container, alongside the chart's own PEBBLE_VERBOSE. Same shape as a container's `env`; supports `valueFrom`. |
 | proxy.envFrom | list | `[]` | Extra envFrom added to the squid container. Same shape as a container's `envFrom`. |
 | proxy.gracefulShutdownSeconds | int | `45` | Seconds squid keeps serving already-open connections after a shutdown signal (squid.conf's shutdown_lifetime), before terminating. Protects in-flight agent traffic (git+ssh, HTTP(S) CONNECT) when a squid replica rolls or scales down. New connections are refused immediately. Set to "0" to disable graceful shutdown. |
@@ -601,6 +606,7 @@ Pebble entrypoint relay that to its own stdout (otherwise it's only visible via
 | proxy.probes | object | `{"quiet":true}` | Readiness/liveness probe behavior. The startup probe always uses tcpSocket, regardless of this setting. |
 | proxy.probes.quiet | bool | `true` | When true (default), readiness/liveness probes check for a LISTEN socket via /proc/net/tcp[6] instead of connecting - squid can't log a connection it never saw, so this keeps NONE_NONE/000 error:transaction-end-before-headers noise out of the access log. This is a weaker check than tcpSocket: it confirms squid is listening, not that it's actually accepting connections. Set to false to use tcpSocket instead, at the cost of that log noise on every probe. |
 | proxy.revisionHistoryLimit | int | `5` | Number of old ReplicaSets to keep for rollback (Deployment's revisionHistoryLimit). |
+| proxy.sshHosts | list | `["github.com","gitlab.com"]` | Hosts agents reach over git+ssh (port 22). Squid always allows CONNECT to them, in both allow-list modes (unless a host is in denyList), and each agent's ~/.ssh/config tunnels them through squid. The chart ships host keys for github.com and gitlab.com only: any other host needs its key in known_hosts. The deploy key is registered on GitHub by the sshKey Job; for GitLab, add the public key to the GitLab account yourself. Remove gitlab.com to close that port. |
 | proxy.startupWaitTimeoutSeconds | int | `120` | Seconds each per-repo agent's wait-for-squid init container spends polling squid before giving up (statefulset-repo.yaml). Guards startup ordering on a cold install for any installer - helm, kubectl, or ArgoCD (which also gets a sync-wave hint, see statefulset-repo.yaml). |
 | proxy.tolerations | list | `[]` | tolerations for the squid Deployment. |
 | remoteControl | object | `{"capacity":8,"firstBootTimeoutSeconds":900,"permissionMode":"bypassPermissions","spawn":"worktree","unhealthyTimeoutSeconds":45,"worktreeMaxAgeDays":10}` | Defaults for the `claude remote-control` invocation each agent runs once login is complete (see the seed-home/clone-repo init containers and the agent container's startup logic). Any of these can be overridden per-repo via `repos[].remoteControl`. |

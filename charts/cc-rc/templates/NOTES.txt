@@ -26,7 +26,7 @@ content), make sure the relevant host (github.com, .githubusercontent.com, ...) 
 included above.
 {{- end }}
 
-git+ssh (github.com:22) is always reachable, in both modes, tunneled through squid -
+git+ssh (port 22 on {{ join ", " .Values.proxy.sshHosts }}) is always reachable, in both modes, tunneled through squid -
 see "SSH deploy key" in charts/cc-rc/README.md.
 
 Each agent pod's PVCs (/home/dev/.claude, /workspace) persist across restarts, and the
