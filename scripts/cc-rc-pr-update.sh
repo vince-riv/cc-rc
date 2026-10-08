@@ -12,7 +12,7 @@ set -euo pipefail
 #
 # Usage:
 #   cc-rc-pr-update --title TITLE --summary-file F --plan-file F \
-#     --ledger-file F [--ready]
+#     --ledger-file F [--base BRANCH] [--ready]
 #   cc-rc-pr-update --ready
 #
 # --title/--summary-file/--plan-file/--ledger-file must all be given
@@ -20,6 +20,10 @@ set -euo pipefail
 # plan/ledger comment are always regenerated from all three, so they can't
 # drift out of the template). Each *-file value may be "-" to read that
 # section from stdin.
+#
+# --base sets the PR's base branch (default: the repo's default branch).
+# Use it for a PR in a stack, where each PR's base is the branch of the PR
+# below it. On a later call it re-targets the existing PR's base.
 #
 # --ready marks the branch's existing PR ready for review. It can be
 # combined with the flags above (edits the body and comment, then marks
@@ -34,7 +38,7 @@ set -euo pipefail
 usage() {
   cat >&2 <<'EOF'
 Usage:
-  cc-rc-pr-update --title TITLE --summary-file F --plan-file F --ledger-file F [--ready]
+  cc-rc-pr-update --title TITLE --summary-file F --plan-file F --ledger-file F [--base BRANCH] [--ready]
   cc-rc-pr-update --ready
 EOF
   exit 1
@@ -44,6 +48,7 @@ title=""
 summary_file=""
 plan_file=""
 ledger_file=""
+base=""
 ready=0
 
 while [[ $# -gt 0 ]]; do
@@ -52,6 +57,7 @@ while [[ $# -gt 0 ]]; do
     --summary-file) summary_file="${2:?--summary-file needs a value}"; shift 2 ;;
     --plan-file) plan_file="${2:?--plan-file needs a value}"; shift 2 ;;
     --ledger-file) ledger_file="${2:?--ledger-file needs a value}"; shift 2 ;;
+    --base) base="${2:?--base needs a value}"; shift 2 ;;
     --ready) ready=1; shift ;;
     -h|--help) usage ;;
     *) echo "Unknown argument: $1" >&2; usage ;;
@@ -66,6 +72,9 @@ if [[ "$content_flags_given" -eq 1 ]]; then
     echo "--title, --summary-file, --plan-file, and --ledger-file must all be given together." >&2
     usage
   fi
+elif [[ -n "$base" ]]; then
+  echo "--base needs --title, --summary-file, --plan-file, and --ledger-file." >&2
+  usage
 elif [[ "$ready" -ne 1 ]]; then
   usage
 fi
@@ -143,15 +152,18 @@ ${ledger}
 COMMENTEOF
 )"
 
+  base_args=()
+  [[ -n "$base" ]] && base_args=(--base "$base")
+
   if [[ -z "$pr_number" ]]; then
-    if ! gh pr create --draft --title "$title" --body "$summary" --head "$branch"; then
+    if ! gh pr create --draft --title "$title" --body "$summary" --head "$branch" "${base_args[@]}"; then
       echo "Could not open a draft PR for '$branch'. GitHub needs at least one commit the base branch doesn't have - commit and push your first chunk of work, then re-run." >&2
       exit 1
     fi
     pr_number="$(gh pr view "$branch" --json number -q .number)"
     echo "Created draft PR #$pr_number"
   else
-    gh pr edit "$pr_number" --title "$title" --body "$summary"
+    gh pr edit "$pr_number" --title "$title" --body "$summary" "${base_args[@]}"
     echo "Updated PR #$pr_number"
   fi
 

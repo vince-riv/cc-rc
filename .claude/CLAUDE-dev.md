@@ -103,6 +103,8 @@ cc-rc-pr-update \
   separate planning step).
 - `--ledger-file`: the progress ledger (see below). Leave it empty, or use
   a one-line placeholder, for the very first call.
+- `--base` (optional): the PR's base branch. Omit it to target the repo's
+  default branch. Only a PR in a stack needs it — see section 6.
 
 Any of the three flags accepts `-` to read that section from stdin instead
 of a file. Re-running the command regenerates everything from the three
@@ -159,3 +161,57 @@ is what you want rendered anyway.
    existing PR; add `--title`/`--summary-file`/`--plan-file`/
    `--ledger-file` too if you want a final body and comment refresh at the
    same time).
+
+## 6. Dependent PRs: use a GitHub PR stack
+
+Sometimes a task ships as several PRs that depend on each other in order:
+each PR builds on the one before it. Split a task this way only when the
+user asks for it, or when one PR would be too large to review well. Changes
+that don't depend on each other get separate, independent PRs against the
+default branch.
+
+When PRs do depend on each other, put them in a native **GitHub PR stack**.
+Don't stop at chaining them by base branch. A stack is a first-class GitHub
+object: `GET /repos/{owner}/{repo}/stacks/{number}` returns its base, its
+`open` state, and the ordered `pull_requests`, and each PR's
+`GET /pulls/{n}` carries a `stack` field (`id`, `number`, `base`, `size`,
+`position`; `null` for a PR outside a stack).
+
+`gh` has no `stack` subcommand, so use the REST API through `gh api`:
+
+1. Branch each layer from the one below it. The bottom branch comes from
+   `origin/<default-branch>` as in section 1; the next comes from the
+   bottom branch, and so on. Push each one with `git push -u`.
+2. Open each PR with `cc-rc-pr-update`. Omit `--base` for the bottom PR.
+   For every PR above it, pass `--base <branch-of-the-PR-below>`. Each PR
+   gets its own summary, plan, and ledger.
+3. As soon as the bottom two PRs exist, create the stack. List PR numbers
+   bottom to top; each PR's base must be the head branch of the PR before
+   it:
+   ```sh
+   gh api -X POST 'repos/{owner}/{repo}/stacks' \
+     -F 'pull_requests[]=101' -F 'pull_requests[]=102'
+   ```
+   The response holds the stack `number`.
+4. Add each later PR to the top of the stack. List only the new PRs; the
+   first one's base must be the head branch of the current top PR:
+   ```sh
+   gh api -X POST 'repos/{owner}/{repo}/stacks/<stack-number>/add' \
+     -F 'pull_requests[]=103'
+   ```
+5. Confirm each PR is in the stack:
+   `gh api 'repos/{owner}/{repo}/pulls/<n>' -q .stack`. Record the stack
+   number and the PR's position in every PR's ledger, so a fresh agent can
+   find the rest of the stack.
+
+If a lower PR changes, bring the branches above it up to date (rebase or
+merge, then push; `--force-with-lease` is fine on your own task branches).
+
+Errors:
+
+- `404` from the stacks endpoints means stacked PRs aren't enabled for that
+  repo. Keep the base-branch chain, say so in each ledger, and tell the
+  user.
+- `422` means the PRs can't form a valid stack — usually a PR's base isn't
+  the head branch of the PR below it. Fix the bases with
+  `cc-rc-pr-update --base`, then retry.
