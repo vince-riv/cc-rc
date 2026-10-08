@@ -201,6 +201,9 @@ through squid (ProxyCommand) for names written in ~/.ssh/config, so a
 the agent NetworkPolicy.
 */}}
 {{- define "cc-rc.validateSshHosts" -}}
+{{- if not (kindIs "slice" .Values.proxy.sshHosts) -}}
+{{ fail "proxy.sshHosts must be a list of hostnames." }}
+{{- end -}}
 {{- range .Values.proxy.sshHosts -}}
 {{- if not (regexMatch "^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$" (toString .)) -}}
 {{ fail (printf "proxy.sshHosts entries must be plain hostnames (no leading dot, wildcard, CIDR or port); got %q." (toString .)) }}

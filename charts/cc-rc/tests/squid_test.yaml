@@ -602,3 +602,11 @@ tests:
     asserts:
       - failedTemplate:
           errorMessage: 'proxy.sshHosts entries must be plain hostnames (no leading dot, wildcard, CIDR or port); got ".gitlab.com".'
+
+  - it: rejects a proxy.sshHosts that is not a list
+    template: deployment-squid.yaml
+    set:
+      proxy.sshHosts: github.com
+    asserts:
+      - failedTemplate:
+          errorMessage: "proxy.sshHosts must be a list of hostnames."
