@@ -195,6 +195,23 @@ Secret to exist (fails the whole render if misconfigured).
 {{- end -}}
 
 {{/*
+Validate proxy.sshHosts. Each entry must be a plain hostname: ssh only goes
+through squid (ProxyCommand) for names written in ~/.ssh/config, so a
+".example.com" suffix match or a CIDR would be allowed by squid but dropped by
+the agent NetworkPolicy.
+*/}}
+{{- define "cc-rc.validateSshHosts" -}}
+{{- if not (kindIs "slice" .Values.proxy.sshHosts) -}}
+{{ fail "proxy.sshHosts must be a list of hostnames." }}
+{{- end -}}
+{{- range .Values.proxy.sshHosts -}}
+{{- if not (regexMatch "^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$" (toString .)) -}}
+{{ fail (printf "proxy.sshHosts entries must be plain hostnames (no leading dot, wildcard, CIDR or port); got %q." (toString .)) }}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Validate git identity configuration. Call from any template that needs
 the .gitconfig ConfigMap to exist (fails the whole render if unset).
 */}}

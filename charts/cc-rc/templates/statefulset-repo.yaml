@@ -1,5 +1,6 @@
 {{- include "cc-rc.validateGithubAuth" . -}}
 {{- include "cc-rc.validateGitIdentity" . -}}
+{{- include "cc-rc.validateSshHosts" . -}}
 {{- include "cc-rc.validateRemoteControl" . -}}
 {{- $root := . -}}
 {{- $squidHost := printf "%s.%s.svc.cluster.local" (include "cc-rc.squidServiceName" .) .Release.Namespace -}}
@@ -145,6 +146,8 @@ spec:
               value: {{ $squidHost | quote }}
             - name: SQUID_PORT
               value: {{ $root.Values.proxy.service.port | quote }}
+            - name: SSH_HOSTS
+              value: {{ join " " $root.Values.proxy.sshHosts | quote }}
           volumeMounts:
             - name: home
               mountPath: /mnt/home-pvc
