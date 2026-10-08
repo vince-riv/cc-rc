@@ -1,3 +1,4 @@
+{{- include "cc-rc.validateSshHosts" . -}}
 {{- $blockedDomains := list -}}
 {{- $blockedCidrs := list -}}
 {{- range .Values.proxy.defaultBlocked -}}

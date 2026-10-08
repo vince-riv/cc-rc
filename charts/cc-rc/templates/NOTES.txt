@@ -26,8 +26,12 @@ content), make sure the relevant host (github.com, .githubusercontent.com, ...) 
 included above.
 {{- end }}
 
+{{- if .Values.proxy.sshHosts }}
 git+ssh (port 22 on {{ join ", " .Values.proxy.sshHosts }}) is always reachable, in both modes, tunneled through squid -
 see "SSH deploy key" in charts/cc-rc/README.md.
+{{- else }}
+git+ssh is disabled (proxy.sshHosts is empty).
+{{- end }}
 
 Each agent pod's PVCs (/home/dev/.claude, /workspace) persist across restarts, and the
 init container skips re-cloning if the repo is already present in /workspace.

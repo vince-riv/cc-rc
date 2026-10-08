@@ -572,7 +572,7 @@ tests:
           path: spec.template.metadata.annotations["prometheus.io/scrape"]
           value: "true"
 
-  - it: proxy.sshHosts drives the git+ssh carve-out, and an empty list removes it
+  - it: proxy.sshHosts limits the git+ssh carve-out to the listed hosts
     template: configmap-squid.yaml
     set:
       proxy.sshHosts:
@@ -593,3 +593,12 @@ tests:
       - notMatchRegex:
           path: data["squid.conf"]
           pattern: "ssh_hosts"
+
+  - it: rejects proxy.sshHosts entries that are not plain hostnames
+    template: deployment-squid.yaml
+    set:
+      proxy.sshHosts:
+        - .gitlab.com
+    asserts:
+      - failedTemplate:
+          errorMessage: 'proxy.sshHosts entries must be plain hostnames (no leading dot, wildcard, CIDR or port); got ".gitlab.com".'

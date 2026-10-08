@@ -1,5 +1,6 @@
 {{- include "cc-rc.validateGithubAuth" . -}}
 {{- include "cc-rc.validateGitIdentity" . -}}
+{{- include "cc-rc.validateSshHosts" . -}}
 {{- include "cc-rc.validateRemoteControl" . -}}
 {{- $root := . -}}
 {{- $squidHost := printf "%s.%s.svc.cluster.local" (include "cc-rc.squidServiceName" .) .Release.Namespace -}}

@@ -430,6 +430,7 @@ proxy:
   # them, in both allow-list modes (unless a host is in denyList), and each agent's
   # ~/.ssh/config tunnels them through squid. The chart ships host keys for
   # github.com and gitlab.com only: any other host needs its key in known_hosts.
+  # Plain hostnames only (no leading dot, wildcard, CIDR or port).
   # The deploy key is registered on GitHub by the sshKey Job; for GitLab, add the
   # public key to the GitLab account yourself. Remove gitlab.com to close that port.
   sshHosts:
