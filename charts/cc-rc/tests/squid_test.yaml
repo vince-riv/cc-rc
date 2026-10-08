@@ -326,6 +326,9 @@ tests:
           pattern: "http_access allow github_ssh port_22"
       - matchRegex:
           path: data["squid.conf"]
+          pattern: "http_access allow gitlab_ssh port_22"
+      - matchRegex:
+          path: data["squid.conf"]
           pattern: "acl open_ports port 80 443 8080 8443 3000 5000 8000 9000"
       - matchRegex:
           path: data["squid.conf"]

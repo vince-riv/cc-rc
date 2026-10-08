@@ -78,6 +78,12 @@ tests:
           path: data["seed-ssh.sh"]
           # git+ssh tunnels through squid via connect-proxy's `connect`.
           pattern: 'ProxyCommand connect -H \$\{SQUID_HOST\}:\$\{SQUID_PORT\} %h %p'
+      - matchRegex:
+          path: data["seed-ssh.sh"]
+          pattern: "Host gitlab\\.com\\n    User git"
+      - matchRegex:
+          path: data["seed-ssh.sh"]
+          pattern: "gitlab\\.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAfuCHKVTjquxvt6CM6tdG4SLp1Btn/nOeHHE5UOzRdf"
 
   - it: create-ssh-key.sh is a no-op if the secret exists, and rolls back the GitHub key if the secret write fails
     asserts:

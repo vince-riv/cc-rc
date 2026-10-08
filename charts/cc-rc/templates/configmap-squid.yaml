@@ -150,6 +150,8 @@ data:
     acl github_ssh dstdomain -n github.com
     acl port_22 port 22
     http_access allow github_ssh port_22
+    acl gitlab_ssh dstdomain -n gitlab.com
+    http_access allow gitlab_ssh port_22
 
     # -- 5. allow-list-or-open-web logic --
     {{- if .Values.proxy.allowList }}

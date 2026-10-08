@@ -16,6 +16,16 @@ chmod 700 "$SSH_DIR"
 install -m 600 /mnt/ssh-key/id_ed25519 "$SSH_DIR/id_ed25519"
 install -m 644 /mnt/ssh-key/id_ed25519.pub "$SSH_DIR/id_ed25519.pub"
 
+# With a proxy in front of us, tunnel git+ssh through squid via
+# connect-proxy's `connect` (CONNECT method) - squid's own squid.conf allows
+# CONNECT to github.com:22 and gitlab.com:22 unconditionally, see
+# configmap-squid.yaml. Without one, ssh reaches the hosts directly and no
+# ProxyCommand is written.
+PROXY_LINE=""
+if [ -n "$SQUID_HOST" ]; then
+  PROXY_LINE="    ProxyCommand connect -H ${SQUID_HOST}:${SQUID_PORT} %h %p"
+fi
+
 # Always rewritten (unlike known_hosts below): squid's host/port are
 # chart-derived, not user data, so a stale copy should never win.
 cat > "$SSH_DIR/config" <<EOF
@@ -24,17 +34,15 @@ Host github.com
     IdentityFile ~/.ssh/id_ed25519
     IdentitiesOnly yes
     StrictHostKeyChecking yes
-EOF
+${PROXY_LINE}
 
-# With a proxy in front of us, tunnel git+ssh through squid via
-# connect-proxy's `connect` (CONNECT method) - squid's own squid.conf allows
-# CONNECT to github.com:22 unconditionally, see configmap-squid.yaml. Without
-# one, ssh reaches github.com:22 directly and no ProxyCommand is written.
-if [ -n "$SQUID_HOST" ]; then
-  cat >> "$SSH_DIR/config" <<EOF
-    ProxyCommand connect -H ${SQUID_HOST}:${SQUID_PORT} %h %p
+Host gitlab.com
+    User git
+    IdentityFile ~/.ssh/id_ed25519
+    IdentitiesOnly yes
+    StrictHostKeyChecking yes
+${PROXY_LINE}
 EOF
-fi
 chmod 644 "$SSH_DIR/config"
 
 KNOWN_HOSTS="$SSH_DIR/known_hosts"
@@ -48,4 +56,12 @@ EOF
   chmod 644 "$KNOWN_HOSTS"
 else
   echo "known_hosts already present at $KNOWN_HOSTS - leaving it alone."
+fi
+
+# GitLab's host key is added separately from the block above, so PVCs that
+# already hold a known_hosts file still get it. ED25519 fingerprint
+# SHA256:eUXGGm1YGsMAS7vkcx6JOJdOGHPem5gQp4taiCfCLB8 (published by GitLab).
+if ! grep -qE '^gitlab\.com ' "$KNOWN_HOSTS"; then
+  echo "Adding GitLab's published host key to $KNOWN_HOSTS."
+  echo 'gitlab.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAfuCHKVTjquxvt6CM6tdG4SLp1Btn/nOeHHE5UOzRdf' >> "$KNOWN_HOSTS"
 fi

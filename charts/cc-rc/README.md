@@ -260,10 +260,11 @@ API and `api.github.com` directly.
 Each agent's `seed-ssh` init container then copies that `Secret` onto the home PVC on
 every boot (`~/.ssh/id_ed25519` at `0600`, `~/.ssh` at `0700`) and seeds
 `~/.ssh/known_hosts` with GitHub's published host keys — but only if `known_hosts`
-doesn't already exist, so it's never clobbered once present. It also (re)writes
-`~/.ssh/config` on every boot, pointing `git@github.com` at a `ProxyCommand` (the
+doesn't already exist, so it's never clobbered once present. GitLab's host key for
+`gitlab.com` is appended if missing. It also (re)writes
+`~/.ssh/config` on every boot, pointing `git@github.com` and `git@gitlab.com` at a `ProxyCommand` (the
 `connect-proxy` package's `connect`) that tunnels the SSH connection through squid via
-`CONNECT` — squid's own config unconditionally allows `CONNECT` to `github.com:22`
+`CONNECT` — squid's own config unconditionally allows `CONNECT` to `github.com:22` and `gitlab.com:22`
 (regardless of `proxy.allowList`/`proxy.denyList`, unless `github.com` is itself denied)
 — so no separate `NetworkPolicy` rule is needed: agent pods already have egress to the
 squid `Service`, and squid's own egress is unrestricted.
