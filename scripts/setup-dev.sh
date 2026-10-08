@@ -44,6 +44,10 @@ cat > ~/.claude/settings.json <<'EOF'
   },
   "outputStyle": "STE100 + ADHD",
   "theme": "auto",
+  "promptSuggestionEnabled": false,
+  "enabledPlugins": {
+    "gopls-lsp@claude-plugins-official": true
+  },
   "attribution": {
     "sessionUrl": false
   }
