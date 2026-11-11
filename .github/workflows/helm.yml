@@ -61,7 +61,7 @@ jobs:
       # pushed directly even from a workflow. Open/update a PR instead.
       - name: Open PR with regenerated docs
         if: github.event_name == 'push'
-        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8
+        uses: peter-evans/create-pull-request@3ffccacd46053766916f087ce41d627c0b8cf2d1 # v8
         with:
           commit-message: "docs: regenerate Helm chart README via helm-docs"
           title: "docs: regenerate Helm chart README via helm-docs"
